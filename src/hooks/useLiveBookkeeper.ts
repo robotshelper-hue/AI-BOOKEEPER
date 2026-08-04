@@ -46,11 +46,21 @@ export function useLiveBookkeeper(ledger: string, mode: string, transactions: an
   const onMessageRef = useRef(onMessage);
   const onTurnCompleteRef = useRef(onTurnComplete);
   const onToolCallRef = useRef(onToolCall);
+  const ledgerRef = useRef(ledger);
+  const modeRef = useRef(mode);
+  const transactionsRef = useRef(transactions);
+  const categoriesRef = useRef(categories);
+  const historyRef = useRef(history);
 
   useEffect(() => {
     onMessageRef.current = onMessage;
     onTurnCompleteRef.current = onTurnComplete;
     onToolCallRef.current = onToolCall;
+    ledgerRef.current = ledger;
+    modeRef.current = mode;
+    transactionsRef.current = transactions;
+    categoriesRef.current = categories;
+    historyRef.current = history;
   });
   const nextStartTimeRef = useRef<number>(0);
   const activeSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
@@ -188,14 +198,15 @@ export function useLiveBookkeeper(ledger: string, mode: string, transactions: an
       };
 
       ws.onopen = () => {
+        isConnectingRef.current = false;
         setIsConnected(true);
         ws.send(JSON.stringify({
           init: {
-            ledger,
-            mode,
-            transactions,
-            categories,
-            history
+            ledger: ledgerRef.current,
+            mode: modeRef.current,
+            transactions: transactionsRef.current,
+            categories: categoriesRef.current,
+            history: historyRef.current
           }
         }));
       };
@@ -266,7 +277,7 @@ export function useLiveBookkeeper(ledger: string, mode: string, transactions: an
       setError(err.message || 'Failed to start Live API session');
       stop();
     }
-  }, [ledger, mode, transactions, categories, history, stop]);
+  }, [stop]);
 
   const sendText = useCallback((text: string) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
