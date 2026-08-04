@@ -103,6 +103,9 @@ export function useLiveBookkeeper(ledger: string, mode: string, transactions: an
   }, [ledger, mode, stop]);
 
   const playAudioChunk = (audioCtx: AudioContext, base64Audio: string) => {
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
     const pcmData = base64ToPcm(base64Audio);
     const buffer = audioCtx.createBuffer(1, pcmData.length, audioCtx.sampleRate);
     buffer.copyToChannel(pcmData, 0);
@@ -174,7 +177,9 @@ export function useLiveBookkeeper(ledger: string, mode: string, transactions: an
       processor.onaudioprocess = (e) => {
         if (ws.readyState === WebSocket.OPEN && serverReady) {
           // Prevent echo: don't send audio if the assistant is currently speaking
-          const isSpeaking = outputAudioCtxRef.current && nextStartTimeRef.current > outputAudioCtxRef.current.currentTime;
+          const isSpeaking = outputAudioCtxRef.current && 
+                             outputAudioCtxRef.current.state === 'running' && 
+                             nextStartTimeRef.current > outputAudioCtxRef.current.currentTime;
           if (!isSpeaking) {
             const base64 = pcmToBase64(e.inputBuffer.getChannelData(0));
             ws.send(JSON.stringify({ audio: base64 }));
