@@ -1,0 +1,10 @@
+{
+  "name": "AI Bookkeeper",
+  "description": "Voice-enabled AI bookkeeping assistant supporting dual ledgers (Personal/PHP, Business/USD).",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
