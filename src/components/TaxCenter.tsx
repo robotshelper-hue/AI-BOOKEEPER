@@ -14,6 +14,18 @@ export default function TaxCenter() {
   const [loading, setLoading] = useState(true);
   const [activeView, setActiveView] = useState<'dashboard' | 'income' | 'expenses' | 'export'>('dashboard');
 
+  // Filters for reports
+  const [filterCategory, setFilterCategory] = useState<string>('');
+  const [filterStartDate, setFilterStartDate] = useState<string>('');
+  const [filterEndDate, setFilterEndDate] = useState<string>('');
+  const [filterEntity, setFilterEntity] = useState<string>('');
+
+  // Filters for export
+  const [exportStartDate, setExportStartDate] = useState<string>('');
+  const [exportEndDate, setExportEndDate] = useState<string>('');
+  const [exportCategory, setExportCategory] = useState<string>('');
+  const [exportType, setExportType] = useState<'All' | 'Income' | 'Expenses'>('All');
+
   const availableYears = Array.from({ length: 5 }, (_, i) => (new Date().getFullYear() - 2 + i).toString());
 
   useEffect(() => {
@@ -75,6 +87,23 @@ export default function TaxCenter() {
   const totalExpense = expenseTxs.reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
   const netProfit = totalIncome - totalExpense;
 
+  const applyFilters = (txs: any[]) => {
+    return txs.filter(tx => {
+      const txDate = tx.date || new Date(tx.timestamp).toISOString().split('T')[0];
+      if (filterCategory && tx.category !== filterCategory && tx.categoryId !== filterCategory) return false;
+      if (filterStartDate && txDate < filterStartDate) return false;
+      if (filterEndDate && txDate > filterEndDate) return false;
+      if (filterEntity) {
+        const entity = (tx.vendor || tx.client || '').toLowerCase();
+        if (!entity.includes(filterEntity.toLowerCase())) return false;
+      }
+      return true;
+    });
+  };
+
+  const filteredIncomeTxs = applyFilters(incomeTxs);
+  const filteredExpenseTxs = applyFilters(expenseTxs);
+
   // Find transactions needing review
   const needsReview = yearTxs.filter(tx => {
     if (!tx.category) return true; // Uncategorized
@@ -96,7 +125,17 @@ export default function TaxCenter() {
       'Tax Form', 'Tax Section', 'TaxAct Mapping', 'Notes'
     ].join(',');
 
-    const rows = yearTxs.map(tx => {
+    const txsToExport = yearTxs.filter(tx => {
+      const txDate = tx.date || new Date(tx.timestamp).toISOString().split('T')[0];
+      if (exportType === 'Income' && tx.type !== 'Income') return false;
+      if (exportType === 'Expenses' && tx.type !== 'Expense') return false;
+      if (exportCategory && tx.category !== exportCategory && tx.categoryId !== exportCategory) return false;
+      if (exportStartDate && txDate < exportStartDate) return false;
+      if (exportEndDate && txDate > exportEndDate) return false;
+      return true;
+    });
+
+    const rows = txsToExport.map(tx => {
       const txYear = tx.date ? tx.date.substring(0, 4) : new Date(tx.timestamp).getFullYear().toString();
       const mapping = mappings[tx.category] || mappings[tx.categoryId] || {} as Partial<TaxMappingDocument>;
       
@@ -129,6 +168,41 @@ export default function TaxCenter() {
   };
 
   if (loading) return <div className="text-center py-8">Loading tax data...</div>;
+
+  const FilterBar = () => (
+    <div className="p-4 bg-white border-b border-gray-200 flex flex-wrap gap-4 items-end">
+      <div>
+        <label className="block text-xs font-medium text-gray-500 mb-1">Date Range</label>
+        <div className="flex items-center gap-2">
+          <input type="date" value={filterStartDate} onChange={e => setFilterStartDate(e.target.value)} className="text-sm border border-gray-300 rounded-md px-2 py-1.5 focus:ring-indigo-500 focus:border-indigo-500" />
+          <span className="text-gray-400">-</span>
+          <input type="date" value={filterEndDate} onChange={e => setFilterEndDate(e.target.value)} className="text-sm border border-gray-300 rounded-md px-2 py-1.5 focus:ring-indigo-500 focus:border-indigo-500" />
+        </div>
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-500 mb-1">Category</label>
+        <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)} className="text-sm border border-gray-300 rounded-md px-2 py-1.5 focus:ring-indigo-500 focus:border-indigo-500 min-w-[150px]">
+          <option value="">All Categories</option>
+          {Object.values(categories)
+            .filter(c => c.active && (activeView === 'income' ? c.type === 'Income' : c.type === 'Expense'))
+            .map(c => <option key={c.id} value={c.name}>{c.name}</option>)
+          }
+        </select>
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-500 mb-1">{activeView === 'income' ? 'Client' : 'Vendor'}</label>
+        <input type="text" placeholder="Search..." value={filterEntity} onChange={e => setFilterEntity(e.target.value)} className="text-sm border border-gray-300 rounded-md px-2 py-1.5 focus:ring-indigo-500 focus:border-indigo-500 w-40" />
+      </div>
+      {(filterCategory || filterStartDate || filterEndDate || filterEntity) && (
+        <button onClick={() => {
+          setFilterCategory('');
+          setFilterStartDate('');
+          setFilterEndDate('');
+          setFilterEntity('');
+        }} className="text-sm text-gray-500 hover:text-gray-700 underline mb-1.5">Clear Filters</button>
+      )}
+    </div>
+  );
 
   return (
     <div className="space-y-6">
@@ -252,6 +326,7 @@ export default function TaxCenter() {
           <div className="p-4 border-b border-gray-200 bg-gray-50">
             <h3 className="font-semibold text-gray-900">Business Income ({taxYear})</h3>
           </div>
+          <FilterBar />
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-left">
               <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b border-gray-200">
@@ -264,7 +339,7 @@ export default function TaxCenter() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {incomeTxs.map(tx => (
+                {filteredIncomeTxs.map(tx => (
                   <tr key={tx.id}>
                     <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{tx.date || new Date(tx.timestamp).toISOString().split('T')[0]}</td>
                     <td className="px-4 py-3 font-medium text-gray-900">{tx.client || '-'}</td>
@@ -284,6 +359,7 @@ export default function TaxCenter() {
           <div className="p-4 border-b border-gray-200 bg-gray-50">
             <h3 className="font-semibold text-gray-900">Business Expenses ({taxYear})</h3>
           </div>
+          <FilterBar />
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-left">
               <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b border-gray-200">
@@ -297,7 +373,7 @@ export default function TaxCenter() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {expenseTxs.map(tx => {
+                {filteredExpenseTxs.map(tx => {
                   const mapping = mappings[tx.category] || mappings[tx.categoryId];
                   return (
                     <tr key={tx.id}>
@@ -321,9 +397,37 @@ export default function TaxCenter() {
           <FileText className="w-16 h-16 text-indigo-200 mx-auto mb-4" />
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Tax-Ready Export</h2>
           <p className="text-gray-500 mb-8">
-            Generate a comprehensive CSV report for the {taxYear} tax year containing all business transactions,
+            Generate a comprehensive CSV report for the {taxYear} tax year containing business transactions,
             complete with mapped tax categories and TaxAct forms.
           </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-left max-w-lg mx-auto mb-8 bg-gray-50 p-4 rounded-lg border border-gray-200">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Export Type</label>
+              <select value={exportType} onChange={e => setExportType(e.target.value as any)} className="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm px-3 py-2 border bg-white">
+                <option value="All">All Transactions</option>
+                <option value="Income">Income Only</option>
+                <option value="Expenses">Expenses Only</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+              <select value={exportCategory} onChange={e => setExportCategory(e.target.value)} className="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm px-3 py-2 border bg-white">
+                <option value="">All Categories</option>
+                {Object.values(categories).filter(c => c.active).map(c => (
+                  <option key={c.id} value={c.name}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Start Date (Optional)</label>
+              <input type="date" value={exportStartDate} onChange={e => setExportStartDate(e.target.value)} className="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm px-3 py-2 border bg-white" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">End Date (Optional)</label>
+              <input type="date" value={exportEndDate} onChange={e => setExportEndDate(e.target.value)} className="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm px-3 py-2 border bg-white" />
+            </div>
+          </div>
           
           {needsReview.length > 0 && (
             <div className="mb-8 p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-left text-sm text-yellow-800 flex items-start gap-3">

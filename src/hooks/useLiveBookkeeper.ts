@@ -65,6 +65,8 @@ export function useLiveBookkeeper(ledger: string, mode: string, transactions: an
   const nextStartTimeRef = useRef<number>(0);
   const activeSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const isConnectingRef = useRef(false);
+  const isEndingSessionRef = useRef(false);
+  const serverTurnCompletedRef = useRef(false);
 
   const stop = useCallback(() => {
     isConnectingRef.current = false;
@@ -100,6 +102,8 @@ export function useLiveBookkeeper(ledger: string, mode: string, transactions: an
     }
     setIsConnected(false);
     nextStartTimeRef.current = 0;
+    isEndingSessionRef.current = false;
+    serverTurnCompletedRef.current = false;
   }, []);
 
   useEffect(() => {
@@ -125,8 +129,16 @@ export function useLiveBookkeeper(ledger: string, mode: string, transactions: an
     source.connect(audioCtx.destination);
 
     activeSourcesRef.current.add(source);
+    
+    const checkEndSession = () => {
+      if (isEndingSessionRef.current && serverTurnCompletedRef.current && activeSourcesRef.current.size === 0) {
+        setTimeout(stop, 500);
+      }
+    };
+
     source.onended = () => {
       activeSourcesRef.current.delete(source);
+      checkEndSession();
     };
 
     const currentTime = audioCtx.currentTime;
@@ -141,6 +153,8 @@ export function useLiveBookkeeper(ledger: string, mode: string, transactions: an
   const start = useCallback(async () => {
     if (wsRef.current || isConnectingRef.current) return;
     isConnectingRef.current = true;
+    isEndingSessionRef.current = false;
+    serverTurnCompletedRef.current = false;
     try {
       setError(null);
       // Determine WebSocket URL
@@ -238,8 +252,21 @@ export function useLiveBookkeeper(ledger: string, mode: string, transactions: an
           activeSourcesRef.current.clear();
           nextStartTimeRef.current = 0; // stop playback / clear queue basically
         }
-        if (msg.turnComplete && onTurnCompleteRef.current) {
-          onTurnCompleteRef.current();
+        if (msg.endSession) {
+          isEndingSessionRef.current = true;
+          // Mute mic immediately so user doesn't interrupt the goodbye
+          if (streamRef.current) {
+            streamRef.current.getTracks().forEach(t => t.stop());
+          }
+        }
+        if (msg.turnComplete) {
+          serverTurnCompletedRef.current = true;
+          if (onTurnCompleteRef.current) {
+            onTurnCompleteRef.current();
+          }
+          if (isEndingSessionRef.current && activeSourcesRef.current.size === 0) {
+            setTimeout(stop, 500);
+          }
         }
         if (msg.toolCall && onToolCallRef.current) {
           Promise.resolve(onToolCallRef.current(msg.toolCall.name, msg.toolCall.args)).then((result) => {

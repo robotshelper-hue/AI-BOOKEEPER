@@ -253,6 +253,15 @@ Never modify or invent any records. Output your analysis in Markdown format, usi
             }
           };
 
+          const endSessionTool = {
+            name: "endSession",
+            description: "Ends the conversation and disconnects the microphone. Call this when the user says goodbye, or when they indicate they have no further questions or tasks.",
+            parameters: {
+              type: Type.OBJECT,
+              properties: {}
+            }
+          };
+
           
           const historyContext = history && history.length > 0 
             ? `\n\nHere is the recent conversation history for context:\n${history.map((m: any) => `${m.role.toUpperCase()}: ${m.content}`).join('\n')}` 
@@ -281,8 +290,9 @@ CRITICAL: You MUST verify the category against the provided list BEFORE calling 
 7. **Confirmation**: Do NOT say you have saved or recorded the transaction until AFTER you call the tool. Call the tool first. Keep confirmations short (e.g., "Done. I recorded ₱1,500 for Groceries as a Personal expense.").
 8. **Corrections & Deletions**: You can update or delete transactions using natural language (e.g., "Change that to $47", "Delete the last transaction"). Ask for confirmation before deleting.
 9. **Multiple Transactions**: You can record multiple transactions in one statement.
+10. **Ending the Session**: When the user says goodbye, or if you ask if they need anything else and they say no, you MUST call the 'endSession' tool to gracefully end the conversation.
 
-You have tools to 'recordTransactions', 'updateTransaction', and 'deleteTransaction'. Use them!
+You have tools to 'recordTransactions', 'updateTransaction', 'deleteTransaction', and 'endSession'. Use them!
 
 Q&A / ACCOUNTANT:
 If they ask about past transactions, use the following JSON list of their recorded transactions (which includes their 'id'):
@@ -292,7 +302,7 @@ ANALYSIS / ADVISOR:
 If they ask for insights, advice, or trends, analyze the provided transactions and give them professional financial advice.
 Keep your responses conversational and engaging, as they are spoken out loud. Do not use markdown formatting.
 ${historyContext}`;
-            tools = [{ functionDeclarations: [recordTransactionsTool, updateTransactionTool, deleteTransactionTool] }];
+            tools = [{ functionDeclarations: [recordTransactionsTool, updateTransactionTool, deleteTransactionTool, endSessionTool] }];
           } else if (mode === 'bookkeeper') {
             systemInstruction = `You are an intelligent AI Bookkeeper assistant.
 The current ledger is: ${ledger}.
@@ -312,12 +322,13 @@ CRITICAL: You MUST verify the category against the provided list BEFORE calling 
 7. **Confirmation**: Do NOT say you have saved or recorded the transaction until AFTER you call the tool. Call the tool first. Keep confirmations short (e.g., "Done. I recorded $37 for Hosting as a Business expense.").
 8. **Corrections & Deletions**: You can update or delete transactions. Ask for confirmation before deleting.
 9. **Multiple Transactions**: You can record multiple transactions in one statement.
+10. **Ending the Session**: When the user says goodbye, or if you ask if they need anything else and they say no, you MUST call the 'endSession' tool to gracefully end the conversation.
 
 Here is the JSON list of their recorded transactions (which includes their 'id') so you can find which one to update/delete:
 ${JSON.stringify(transactions || [])}
 
 Keep your responses conversational and engaging, as they are spoken out loud. Do not use markdown formatting.${historyContext}`;
-            tools = [{ functionDeclarations: [recordTransactionsTool, updateTransactionTool, deleteTransactionTool] }];
+            tools = [{ functionDeclarations: [recordTransactionsTool, updateTransactionTool, deleteTransactionTool, endSessionTool] }];
           } else if (mode === 'accountant') {
             systemInstruction = `You are a professional Accountant AI.
 The user is asking questions about their ${ledger} finance data via voice.
@@ -325,7 +336,9 @@ Here is the JSON list of their recorded transactions:
 ${JSON.stringify(transactions || [])}
 
 Answer the user's question accurately based ONLY on the data provided above.
-Keep your responses concise and conversational since they are spoken out loud.${historyContext}`;
+Keep your responses concise and conversational since they are spoken out loud.
+If the user says goodbye, or indicates they have no further questions, you MUST call the 'endSession' tool to end the conversation.${historyContext}`;
+            tools = [{ functionDeclarations: [endSessionTool] }];
           } else if (mode === 'advisor') {
             systemInstruction = `You are a professional Financial Advisor AI.
 You are analyzing the user's ${ledger} finance data via voice.
@@ -333,7 +346,9 @@ Here is the JSON list of their recorded transactions:
 ${JSON.stringify(transactions || [])}
 
 The user will ask for advice or insights on their spending/income trends.
-Keep your responses conversational and engaging. Do not use markdown since this is a voice conversation.${historyContext}`;
+Keep your responses conversational and engaging. Do not use markdown since this is a voice conversation.
+If the user says goodbye, or indicates they have no further questions, you MUST call the 'endSession' tool to end the conversation.${historyContext}`;
+            tools = [{ functionDeclarations: [endSessionTool] }];
           }
 
           let voiceName = "Aoede";
@@ -398,10 +413,22 @@ Keep your responses conversational and engaging. Do not use markdown since this 
                 }
                 if (message.toolCall) {
                   const call = message.toolCall.functionCalls?.[0];
-                  if (call && ["recordTransactions", "updateTransaction", "deleteTransaction"].includes(call.name)) {
-                    clientWs.send(JSON.stringify({
-                      toolCall: call
-                    }));
+                  if (call && ["recordTransactions", "updateTransaction", "deleteTransaction", "endSession"].includes(call.name)) {
+                    if (call.name === "endSession") {
+                      clientWs.send(JSON.stringify({ endSession: true }));
+                      // We must also send a tool response so the model knows the tool succeeded
+                      session.sendToolResponse({
+                        functionResponses: [{
+                          id: call.id,
+                          name: call.name,
+                          response: { result: "Session ended." }
+                        }]
+                      });
+                    } else {
+                      clientWs.send(JSON.stringify({
+                        toolCall: call
+                      }));
+                    }
                   }
                 }
               },
