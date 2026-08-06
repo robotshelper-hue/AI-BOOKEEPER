@@ -3,13 +3,39 @@ import { useAuth } from '../contexts/AuthContext';
 import { collection, query, where, getDocs, addDoc, updateDoc, doc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { CategoryDocument, TaxMappingDocument } from '../types';
-import { Save, Check, AlertCircle } from 'lucide-react';
+import { Save, Check, AlertCircle, RotateCcw } from 'lucide-react';
 
 export default function TaxMappingManager() {
   const { currentUser } = useAuth();
   const [mappings, setMappings] = useState<TaxMappingDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
+  const [resetting, setResetting] = useState(false);
+
+  const resetAllMappings = async () => {
+    if (!currentUser) return;
+    if (!window.confirm('This will reset ALL tax mappings to "Not Verified" and clear all TaxAct Mapping values. Are you sure?')) return;
+    setResetting(true);
+    try {
+      const mapQ = query(collection(db, 'taxMappings'), where('userId', '==', currentUser.uid));
+      const mapSnap = await getDocs(mapQ);
+      for (const docSnap of mapSnap.docs) {
+        await updateDoc(doc(db, 'taxMappings', docSnap.id), {
+          taxActMapping: '',
+          status: 'Not Verified',
+          lastUpdated: Date.now()
+        });
+      }
+      // Refresh the list
+      setMappings(prev => prev.map(m => ({ ...m, taxActMapping: '', status: 'Not Verified' as const })));
+      alert(`Done! ${mapSnap.size} mapping(s) reset to Not Verified.`);
+    } catch (error) {
+      console.error('Error resetting mappings:', error);
+      alert('Failed to reset mappings. Check console for details.');
+    } finally {
+      setResetting(false);
+    }
+  };
 
   useEffect(() => {
     async function fetchMappings() {
@@ -86,7 +112,7 @@ export default function TaxMappingManager() {
     <div className="space-y-6">
       <div className="bg-blue-50 text-blue-800 p-4 rounded-lg text-sm flex items-start gap-3">
         <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-        <div>
+        <div className="flex-1">
           <p className="font-semibold mb-1">Tax Mapping Rules</p>
           <ul className="list-disc pl-4 space-y-1">
             <li>Do NOT guess or invent TaxAct field names.</li>
@@ -94,6 +120,14 @@ export default function TaxMappingManager() {
             <li>Only Administrator can mark as Verified.</li>
           </ul>
         </div>
+        <button
+          onClick={resetAllMappings}
+          disabled={resetting}
+          className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-red-50 text-red-700 border border-red-200 rounded-lg hover:bg-red-100 transition-colors disabled:opacity-50"
+        >
+          <RotateCcw className={`w-3.5 h-3.5 ${resetting ? 'animate-spin' : ''}`} />
+          {resetting ? 'Resetting...' : 'Reset All Mappings'}
+        </button>
       </div>
 
       <div className="overflow-x-auto">

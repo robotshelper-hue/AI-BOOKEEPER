@@ -55,6 +55,7 @@ export default function UnifiedAgentTab({ ledger, userId }: UnifiedAgentProps) {
     const qCat = query(
       collection(db, 'categories'),
       where('userId', '==', userId),
+      where('ledger', '==', ledger === 'personal' ? 'Personal' : 'Business'),
       where('active', '==', true)
     );
     try {

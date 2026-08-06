@@ -107,6 +107,8 @@ export default function TaxCenter() {
   // Find transactions needing review
   const needsReview = yearTxs.filter(tx => {
     if (!tx.category) return true; // Uncategorized
+    if (!tx.date && !tx.timestamp) return true; // Missing date
+    if (!tx.amount && tx.amount !== 0) return true; // Missing amount
     const cat = categories[tx.category] || categories[tx.categoryId];
     if (cat && !cat.active) return true; // Inactive category
     
@@ -138,6 +140,8 @@ export default function TaxCenter() {
     const rows = txsToExport.map(tx => {
       const txYear = tx.date ? tx.date.substring(0, 4) : new Date(tx.timestamp).getFullYear().toString();
       const mapping = mappings[tx.category] || mappings[tx.categoryId] || {} as Partial<TaxMappingDocument>;
+      // Priority 8: Only include tax mapping fields if the mapping is Verified
+      const isVerified = mapping.status === 'Verified';
       
       const cols = [
         tx.date || new Date(tx.timestamp).toISOString().split('T')[0],
@@ -148,10 +152,10 @@ export default function TaxCenter() {
         (tx.type === 'Income' ? tx.client : tx.vendor) || '',
         `"${(tx.description || '').replace(/"/g, '""')}"`,
         `"${tx.category || ''}"`,
-        `"${mapping.taxCategory || ''}"`,
-        `"${mapping.taxForm || ''}"`,
-        `"${mapping.taxSection || ''}"`,
-        `"${mapping.taxActMapping || ''}"`,
+        `"${isVerified ? (mapping.taxCategory || '') : ''}"`,
+        `"${isVerified ? (mapping.taxForm || '') : ''}"`,
+        `"${isVerified ? (mapping.taxSection || '') : ''}"`,
+        `"${isVerified ? (mapping.taxActMapping || '') : ''}"`,
         `"${tx.notes || ''}"`
       ];
       return cols.join(',');
@@ -161,7 +165,7 @@ export default function TaxCenter() {
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `Business_Tax_Export_${taxYear}.csv`);
+    link.setAttribute("download", `Business_Tax_Preparation_${taxYear}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -272,7 +276,13 @@ export default function TaxCenter() {
                 {needsReview.map(tx => {
                   const mapping = mappings[tx.category] || mappings[tx.categoryId];
                   let issue = "Uncategorized";
-                  if (tx.category && (!mapping || mapping.status !== 'Verified')) {
+                  if (!tx.date && !tx.timestamp) {
+                    issue = "Missing Date";
+                  } else if (!tx.amount && tx.amount !== 0) {
+                    issue = "Missing Amount";
+                  } else if (!tx.category) {
+                    issue = "Uncategorized";
+                  } else if (tx.category && (!mapping || mapping.status !== 'Verified')) {
                     issue = mapping ? `Mapping Status: ${mapping.status}` : "Missing Tax Mapping";
                   }
                   
@@ -281,8 +291,8 @@ export default function TaxCenter() {
                       <div>
                         <div className="font-medium text-gray-900">{tx.description || 'No Description'}</div>
                         <div className="text-sm text-gray-500 mt-1 flex flex-wrap gap-x-4">
-                          <span>{tx.date || new Date(tx.timestamp).toISOString().split('T')[0]}</span>
-                          <span className="font-medium text-gray-700">${Number(tx.amount).toFixed(2)}</span>
+                          <span>{tx.date || (tx.timestamp ? new Date(tx.timestamp).toISOString().split('T')[0] : 'No Date')}</span>
+                          <span className="font-medium text-gray-700">${tx.amount != null ? Number(tx.amount).toFixed(2) : 'N/A'}</span>
                           <span className="text-red-600 font-medium text-xs bg-red-50 px-2 py-0.5 rounded-md border border-red-100">{issue}</span>
                           <span className="text-xs bg-gray-100 px-2 py-0.5 rounded-md text-gray-600 border border-gray-200">
                             Category: {tx.category || 'None'}
@@ -395,7 +405,7 @@ export default function TaxCenter() {
       {activeView === 'export' && (
         <div className="bg-white p-8 rounded-xl border border-gray-200 shadow-sm text-center max-w-2xl mx-auto mt-8">
           <FileText className="w-16 h-16 text-indigo-200 mx-auto mb-4" />
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Tax-Ready Export</h2>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">Business Tax Preparation CSV</h2>
           <p className="text-gray-500 mb-8">
             Generate a comprehensive CSV report for the {taxYear} tax year containing business transactions,
             complete with mapped tax categories and TaxAct forms.
@@ -447,7 +457,7 @@ export default function TaxCenter() {
             className="inline-flex items-center justify-center px-6 py-3 border border-transparent text-base font-medium rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm transition-colors"
           >
             <Download className="w-5 h-5 mr-2" />
-            Download {taxYear} Tax Report (CSV)
+            Download {taxYear} Business Tax Preparation CSV
           </button>
           
           <p className="text-xs text-gray-400 mt-6 max-w-md mx-auto">
