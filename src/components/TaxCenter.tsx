@@ -262,7 +262,7 @@ export default function TaxCenter() {
                 Tax Review Dashboard
               </h3>
               <span className="bg-yellow-100 text-yellow-800 text-xs font-medium px-2.5 py-0.5 rounded-full">
-                {needsReview.length} Issues found
+                {needsReview.length} Items Require Review
               </span>
             </div>
             {needsReview.length === 0 ? (
@@ -275,15 +275,15 @@ export default function TaxCenter() {
               <ul className="divide-y divide-gray-200">
                 {needsReview.map(tx => {
                   const mapping = mappings[tx.category] || mappings[tx.categoryId];
-                  let issue = "Uncategorized";
+                  let issue = "Missing Category";
                   if (!tx.date && !tx.timestamp) {
                     issue = "Missing Date";
                   } else if (!tx.amount && tx.amount !== 0) {
                     issue = "Missing Amount";
                   } else if (!tx.category) {
-                    issue = "Uncategorized";
+                    issue = "Missing Category";
                   } else if (tx.category && (!mapping || mapping.status !== 'Verified')) {
-                    issue = mapping ? `Mapping Status: ${mapping.status}` : "Missing Tax Mapping";
+                    issue = mapping ? "Tax Mapping Not Verified" : "Missing Tax Mapping";
                   }
                   
                   return (
