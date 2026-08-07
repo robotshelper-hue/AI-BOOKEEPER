@@ -120,7 +120,7 @@ export default function Transactions() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                       {tx.category}
-                      {tx.client && <span className="text-gray-500 ml-2 font-normal">({tx.client})</span>}
+                      {(tx.client || tx.vendor) && <span className="text-gray-500 ml-2 font-normal">({tx.client || tx.vendor})</span>}
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-500 max-w-xs truncate">
                       {tx.notes || '-'}
