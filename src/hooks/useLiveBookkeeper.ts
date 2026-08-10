@@ -33,9 +33,13 @@ function base64ToPcm(base64: string): Float32Array {
   return float32;
 }
 
+const CONNECT_TIMEOUT_MS = 15000;
+
 export function useLiveBookkeeper(ledger: string, mode: string, transactions: any[], categories: any[], history: any[], onToolCall?: (name: string, args: any) => Promise<any> | any, onMessage?: (text: string, isUser: boolean) => void, onTurnComplete?: () => void) {
   const [isConnected, setIsConnected] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const inputAudioCtxRef = useRef<AudioContext | null>(null);
@@ -70,6 +74,11 @@ export function useLiveBookkeeper(ledger: string, mode: string, transactions: an
 
   const stop = useCallback(() => {
     isConnectingRef.current = false;
+    setIsConnecting(false);
+    if (connectTimeoutRef.current) {
+      clearTimeout(connectTimeoutRef.current);
+      connectTimeoutRef.current = null;
+    }
     activeSourcesRef.current.forEach(source => {
       try { source.stop(); } catch (e) {}
     });
@@ -155,6 +164,7 @@ export function useLiveBookkeeper(ledger: string, mode: string, transactions: an
     isConnectingRef.current = true;
     isEndingSessionRef.current = false;
     serverTurnCompletedRef.current = false;
+    setIsConnecting(true);
     try {
       setError(null);
       // Determine WebSocket URL
@@ -189,6 +199,16 @@ export function useLiveBookkeeper(ledger: string, mode: string, transactions: an
       }
       streamRef.current = stream;
 
+      // Safety net: if the WebSocket/Gemini Live handshake stalls after the mic
+      // permission is granted, the connect guard above would otherwise leave the
+      // hook permanently stuck (wsRef/isConnectingRef never reset, mic button
+      // silently does nothing on further clicks) until the page is refreshed.
+      connectTimeoutRef.current = setTimeout(() => {
+        console.error('Live session connection timed out');
+        setError('Connection timed out. Please try again.');
+        stop();
+      }, CONNECT_TIMEOUT_MS);
+
       const source = inputAudioCtx.createMediaStreamSource(stream);
       const processor = inputAudioCtx.createScriptProcessor(4096, 1, 1);
       processorRef.current = processor;
@@ -213,6 +233,7 @@ export function useLiveBookkeeper(ledger: string, mode: string, transactions: an
 
       ws.onopen = () => {
         isConnectingRef.current = false;
+        setIsConnecting(false);
         setIsConnected(true);
         ws.send(JSON.stringify({
           init: {
@@ -235,6 +256,10 @@ export function useLiveBookkeeper(ledger: string, mode: string, transactions: an
         }
         if (msg.ready) {
           serverReady = true;
+          if (connectTimeoutRef.current) {
+            clearTimeout(connectTimeoutRef.current);
+            connectTimeoutRef.current = null;
+          }
         }
         if (msg.audio && outputAudioCtxRef.current) {
           playAudioChunk(outputAudioCtxRef.current, msg.audio);
@@ -315,5 +340,5 @@ export function useLiveBookkeeper(ledger: string, mode: string, transactions: an
     }
   }, []);
 
-  return { isConnected, start, stop, error, sendText };
+  return { isConnected, isConnecting, start, stop, error, sendText };
 }

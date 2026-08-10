@@ -4,6 +4,9 @@ import { db } from '../lib/firebase';
 import { collection, query, where, getDocs, orderBy, addDoc } from 'firebase/firestore';
 import { VoiceActivationBanner } from './VoiceActivationBanner';
 import { useLiveBookkeeper } from '../hooks/useLiveBookkeeper';
+import { generateOccurrencesForSchedule } from '../hooks/useRecurringTransactionGenerator';
+import { nextOccurrenceOnOrAfter, todayDateString } from '../lib/recurrence';
+import { RecurringScheduleDocument } from '../types';
 
 interface UnifiedAgentProps {
   ledger: string;
@@ -209,6 +212,63 @@ export default function UnifiedAgentTab({ ledger, userId }: UnifiedAgentProps) {
         setTimeout(() => setSuccess(false), 3000);
         fetchData();
         return { result: "Transactions created successfully", newTransactionIds: newTxIds };
+      } else if (name === 'createRecurringSchedule') {
+        // The AI is instructed (server.ts system prompt) to verbally confirm the
+        // amount/category/day with the user and get an explicit yes before ever
+        // calling this tool, so — unlike the old card-based flow — it creates
+        // (and immediately catches up) the schedule directly, same as recordTransactions.
+        const normalizedLedger = args.ledger ? args.ledger.charAt(0).toUpperCase() + args.ledger.slice(1).toLowerCase() : (ledger === 'personal' ? 'Personal' : 'Business');
+        const normalizedType = args.type ? args.type.charAt(0).toUpperCase() + args.type.slice(1).toLowerCase() : 'Expense';
+        const normalizedCurrency = args.currency ? args.currency.toUpperCase() : (normalizedLedger === 'Personal' ? 'PHP' : 'USD');
+        const dayOfMonth = Number(args.dayOfMonth);
+
+        if (!['Personal', 'Business'].includes(normalizedLedger) ||
+            !['Income', 'Expense'].includes(normalizedType) ||
+            isNaN(Number(args.amount)) ||
+            !['PHP', 'USD'].includes(normalizedCurrency) ||
+            !args.category ||
+            isNaN(dayOfMonth) || dayOfMonth < 1 || dayOfMonth > 31) {
+          return { error: `Invalid recurring schedule data provided: ${JSON.stringify(args)}` };
+        }
+
+        const matchedCategory = categories.find(c => c.name.toLowerCase() === args.category.toLowerCase());
+        if (!matchedCategory) {
+          return { error: `Category '${args.category}' does not exist in your settings. You MUST ask the user which existing category to use instead. Do NOT guess.` };
+        }
+
+        const startDate = args.startDate && /^\d{4}-\d{2}-\d{2}$/.test(args.startDate)
+          ? args.startDate
+          : nextOccurrenceOnOrAfter(todayDateString(), dayOfMonth);
+
+        const now = Date.now();
+        const scheduleData: Omit<RecurringScheduleDocument, 'id'> = {
+          userId,
+          ledger: normalizedLedger,
+          type: normalizedType,
+          amount: Number(args.amount),
+          currency: normalizedCurrency,
+          category: matchedCategory.name,
+          vendor: args.vendor || null,
+          client: args.client || null,
+          description: args.description || null,
+          notes: args.notes || null,
+          frequency: 'monthly',
+          dayOfMonth,
+          startDate,
+          nextOccurrenceDate: startDate,
+          lastGeneratedDate: null,
+          active: true,
+          createdBy: 'ai',
+          createdAt: now,
+          updatedAt: now
+        };
+        const docRef = await addDoc(collection(db, 'RecurringSchedules'), scheduleData);
+        await generateOccurrencesForSchedule(docRef.id);
+
+        setSuccess(true);
+        setTimeout(() => setSuccess(false), 3000);
+        fetchData();
+        return { result: "Recurring schedule created successfully", scheduleId: docRef.id };
       } else if (name === 'updateTransaction' && args.id && args.updates) {
         if (args.updates.category) {
           const matchedCategory = categories.find(c => c.name.toLowerCase() === args.updates.category.toLowerCase());
@@ -246,7 +306,7 @@ export default function UnifiedAgentTab({ ledger, userId }: UnifiedAgentProps) {
     }
   }, [userId, ledger, fetchData, categories]);
 
-  const { isConnected, start, stop, error, sendText } = useLiveBookkeeper(
+  const { isConnected, isConnecting, start, stop, error, sendText } = useLiveBookkeeper(
     ledger === 'personal' ? 'Personal' : 'Business',
     'unified',
     transactions,
@@ -305,6 +365,7 @@ export default function UnifiedAgentTab({ ledger, userId }: UnifiedAgentProps) {
       <div className="flex-1 p-6 overflow-y-auto space-y-4 bg-white">
         <VoiceActivationBanner
           isConnected={isConnected}
+          isConnecting={isConnecting}
           onStart={start}
           onStop={stop}
           title="AI Finance Partner"
@@ -325,6 +386,7 @@ export default function UnifiedAgentTab({ ledger, userId }: UnifiedAgentProps) {
             </div>
           </div>
         ))}
+
         <div ref={messagesEndRef} />
       </div>
 

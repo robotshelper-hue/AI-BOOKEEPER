@@ -1,30 +1,35 @@
 import React from 'react';
 import { NavLink, useParams, useNavigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { 
-  Bot, 
-  Receipt, 
-  Settings, 
+import {
+  Bot,
+  Receipt,
+  Settings,
   LogOut,
   LayoutDashboard,
   ArrowLeft,
   BarChart3,
   FileText,
-  Users
+  Users,
+  Repeat
 } from 'lucide-react';
 import { auth } from '../lib/firebase';
 import { signOut } from 'firebase/auth';
+import { useRecurringTransactionGenerator } from '../hooks/useRecurringTransactionGenerator';
 
 export default function Layout() {
   const { ledger } = useParams<{ ledger: string }>();
   const { currentUser } = useAuth();
   const navigate = useNavigate();
 
+  useRecurringTransactionGenerator(currentUser?.uid);
+
   const isBusiness = ledger === 'business';
 
   const navItems = [
     { name: 'AI Hub', path: `/ledger/${ledger}`, icon: Bot, exact: true },
     { name: 'Transactions', path: `/ledger/${ledger}/transactions`, icon: Receipt },
+    { name: 'Recurring', path: `/ledger/${ledger}/recurring`, icon: Repeat },
     { name: 'Analytics', path: `/ledger/${ledger}/analytics`, icon: BarChart3 },
     ...(isBusiness ? [
       { name: 'Clients', path: `/ledger/${ledger}/clients`, icon: Users },

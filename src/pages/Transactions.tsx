@@ -126,7 +126,7 @@ export default function Transactions() {
                       {tx.notes || '-'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-medium text-gray-900">
-                      {tx.currency === 'PHP' ? '₱' : '$'}{tx.amount.toFixed(2)}
+                      {tx.currency === 'PHP' ? '₱' : '$'}{Number(tx.amount || 0).toFixed(2)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
                       {confirmDeleteId === tx.id ? (

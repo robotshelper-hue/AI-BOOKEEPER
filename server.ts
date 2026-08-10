@@ -218,6 +218,28 @@ Never modify or invent any records. Output your analysis in Markdown format, usi
             }
           };
 
+          const createRecurringScheduleTool = {
+            name: "createRecurringSchedule",
+            description: "Creates a recurring transaction schedule (e.g. a monthly subscription or rent) that will keep generating transactions every month until stopped. Use this instead of recordTransactions whenever the user's language implies recurrence (e.g. 'every month', 'monthly', 'each month on the 15th', 'my rent is $500 a month', 'I have a subscription for X'). You MUST verbally confirm the exact amount, category, and day of month with the user and get their explicit yes BEFORE calling this tool — do not call it on the first mention. You MUST use one of the existing valid categories, same as recordTransactions.",
+            parameters: {
+              type: Type.OBJECT,
+              properties: {
+                ledger: { type: Type.STRING, enum: ['Personal', 'Business'] },
+                type: { type: Type.STRING, enum: ['Income', 'Expense'] },
+                amount: { type: Type.NUMBER },
+                currency: { type: Type.STRING, enum: ['PHP', 'USD'] },
+                category: { type: Type.STRING, enum: validCategories },
+                vendor: { type: Type.STRING },
+                client: { type: Type.STRING },
+                description: { type: Type.STRING },
+                notes: { type: Type.STRING },
+                dayOfMonth: { type: Type.NUMBER, description: 'The day of the month (1-31) this recurs on. If the day mentioned does not exist in a shorter month (e.g. 31 in February), it will automatically fall on that month\'s last day.' },
+                startDate: { type: Type.STRING, description: 'YYYY-MM-DD format. The date of the first occurrence. If the user does not specify, use the next upcoming occurrence of dayOfMonth from today.' }
+              },
+              required: ['ledger', 'type', 'amount', 'currency', 'category', 'dayOfMonth', 'startDate']
+            }
+          };
+
           const updateTransactionTool = {
             name: "updateTransaction",
             description: "Updates an existing transaction by ID. Only update the fields that are provided.",
@@ -291,8 +313,9 @@ CRITICAL: You MUST verify the category against the provided list BEFORE calling 
 8. **Corrections & Deletions**: You can update or delete transactions using natural language (e.g., "Change that to $47", "Delete the last transaction"). Ask for confirmation before deleting.
 9. **Multiple Transactions**: You can record multiple transactions in one statement.
 10. **Ending the Session**: When the user says goodbye, or if you ask if they need anything else and they say no, you MUST call the 'endSession' tool to gracefully end the conversation.
+11. **Recurring Transactions**: If the user's language implies this transaction repeats (e.g. "every month", "monthly", "each month on the 15th", "my rent is $500 a month", "I have a subscription for..."), do NOT call recordTransactions. First, verbally confirm the exact amount, category, and day of month it recurs on (e.g., "Just to confirm, that's $50 for Hosting, every month on the 15th — should I set that up?"). Only after the user explicitly confirms (e.g. "yes", "correct"), call 'createRecurringSchedule'. Do not say it has been set up until AFTER you call the tool.
 
-You have tools to 'recordTransactions', 'updateTransaction', 'deleteTransaction', and 'endSession'. Use them!
+You have tools to 'recordTransactions', 'createRecurringSchedule', 'updateTransaction', 'deleteTransaction', and 'endSession'. Use them!
 
 Q&A / ACCOUNTANT:
 If they ask about past transactions, use the following JSON list of their recorded transactions (which includes their 'id'):
@@ -302,7 +325,7 @@ ANALYSIS / ADVISOR:
 If they ask for insights, advice, or trends, analyze the provided transactions and give them professional financial advice.
 Keep your responses conversational and engaging, as they are spoken out loud. Do not use markdown formatting.
 ${historyContext}`;
-            tools = [{ functionDeclarations: [recordTransactionsTool, updateTransactionTool, deleteTransactionTool, endSessionTool] }];
+            tools = [{ functionDeclarations: [recordTransactionsTool, createRecurringScheduleTool, updateTransactionTool, deleteTransactionTool, endSessionTool] }];
           } else if (mode === 'bookkeeper') {
             systemInstruction = `You are an intelligent AI Bookkeeper assistant.
 The current ledger is: ${ledger}.
@@ -323,12 +346,13 @@ CRITICAL: You MUST verify the category against the provided list BEFORE calling 
 8. **Corrections & Deletions**: You can update or delete transactions. Ask for confirmation before deleting.
 9. **Multiple Transactions**: You can record multiple transactions in one statement.
 10. **Ending the Session**: When the user says goodbye, or if you ask if they need anything else and they say no, you MUST call the 'endSession' tool to gracefully end the conversation.
+11. **Recurring Transactions**: If the user's language implies this transaction repeats (e.g. "every month", "monthly", "each month on the 15th", "my rent is $500 a month", "I have a subscription for..."), do NOT call recordTransactions. First, verbally confirm the exact amount, category, and day of month it recurs on (e.g., "Just to confirm, that's $50 for Hosting, every month on the 15th — should I set that up?"). Only after the user explicitly confirms (e.g. "yes", "correct"), call 'createRecurringSchedule'. Do not say it has been set up until AFTER you call the tool.
 
 Here is the JSON list of their recorded transactions (which includes their 'id') so you can find which one to update/delete:
 ${JSON.stringify(transactions || [])}
 
 Keep your responses conversational and engaging, as they are spoken out loud. Do not use markdown formatting.${historyContext}`;
-            tools = [{ functionDeclarations: [recordTransactionsTool, updateTransactionTool, deleteTransactionTool, endSessionTool] }];
+            tools = [{ functionDeclarations: [recordTransactionsTool, createRecurringScheduleTool, updateTransactionTool, deleteTransactionTool, endSessionTool] }];
           } else if (mode === 'accountant') {
             systemInstruction = `You are a professional Accountant AI.
 The user is asking questions about their ${ledger} finance data via voice.
@@ -413,7 +437,7 @@ If the user says goodbye, or indicates they have no further questions, you MUST 
                 }
                 if (message.toolCall) {
                   const call = message.toolCall.functionCalls?.[0];
-                  if (call && ["recordTransactions", "updateTransaction", "deleteTransaction", "endSession"].includes(call.name)) {
+                  if (call && ["recordTransactions", "createRecurringSchedule", "updateTransaction", "deleteTransaction", "endSession"].includes(call.name)) {
                     if (call.name === "endSession") {
                       clientWs.send(JSON.stringify({ endSession: true }));
                       // We must also send a tool response so the model knows the tool succeeded

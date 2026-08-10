@@ -269,7 +269,7 @@ export default function TaxCenter() {
               <div className="p-8 text-center text-gray-500 flex flex-col items-center">
                 <CheckCircle2 className="w-12 h-12 text-green-500 mb-3" />
                 <p className="font-medium text-gray-900">All clear!</p>
-                <p>No unmapped or unverified transactions for {taxYear}.</p>
+                <p>No uncategorized transactions or unverified tax mappings for {taxYear}.</p>
               </div>
             ) : (
               <ul className="divide-y divide-gray-200">
@@ -407,8 +407,9 @@ export default function TaxCenter() {
           <FileText className="w-16 h-16 text-indigo-200 mx-auto mb-4" />
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Business Tax Preparation CSV</h2>
           <p className="text-gray-500 mb-8">
-            Generate a comprehensive CSV report for the {taxYear} tax year containing business transactions,
-            complete with mapped tax categories and TaxAct forms.
+            Generate a Business Tax Preparation CSV containing business transactions
+            and any administrator-verified tax mappings. Unverified tax information will
+            remain blank.
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-left max-w-lg mx-auto mb-8 bg-gray-50 p-4 rounded-lg border border-gray-200">
