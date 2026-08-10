@@ -174,76 +174,30 @@ export function useLiveBookkeeper(ledger: string, mode: string, transactions: an
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
-      const inputAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-      inputAudioCtxRef.current = inputAudioCtx;
-      if (inputAudioCtx.state === 'suspended') {
-        inputAudioCtx.resume();
-      }
-      
-      const outputAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-      outputAudioCtxRef.current = outputAudioCtx;
-      if (outputAudioCtx.state === 'suspended') {
-        outputAudioCtx.resume();
-      }
-
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        }
-      });
-      if (!isConnectingRef.current) {
-        stream.getTracks().forEach(t => t.stop());
-        return;
-      }
-      streamRef.current = stream;
-
-      // Safety net: if the WebSocket/Gemini Live handshake stalls after the mic
-      // permission is granted, the connect guard above would otherwise leave the
-      // hook permanently stuck (wsRef/isConnectingRef never reset, mic button
-      // silently does nothing on further clicks) until the page is refreshed.
-      connectTimeoutRef.current = setTimeout(() => {
-        console.error('Live session connection timed out');
-        setError('Connection timed out. Please try again.');
-        stop();
-      }, CONNECT_TIMEOUT_MS);
-
-      const source = inputAudioCtx.createMediaStreamSource(stream);
-      const processor = inputAudioCtx.createScriptProcessor(4096, 1, 1);
-      processorRef.current = processor;
-
-      source.connect(processor);
-      processor.connect(inputAudioCtx.destination);
-
       let serverReady = false;
+      let wsOpened = false;
+      let micGranted = false;
 
-      processor.onaudioprocess = (e) => {
-        if (ws.readyState === WebSocket.OPEN && serverReady) {
-          // Prevent echo: don't send audio if the assistant is currently speaking
-          const isSpeaking = outputAudioCtxRef.current && 
-                             outputAudioCtxRef.current.state === 'running' && 
-                             nextStartTimeRef.current > outputAudioCtxRef.current.currentTime;
-          if (!isSpeaking) {
-            const base64 = pcmToBase64(e.inputBuffer.getChannelData(0));
-            ws.send(JSON.stringify({ audio: base64 }));
-          }
+      const sendInitIfReady = () => {
+        if (wsOpened && micGranted && wsRef.current?.readyState === WebSocket.OPEN) {
+          isConnectingRef.current = false;
+          setIsConnecting(false);
+          setIsConnected(true);
+          wsRef.current.send(JSON.stringify({
+            init: {
+              ledger: ledgerRef.current,
+              mode: modeRef.current,
+              transactions: transactionsRef.current,
+              categories: categoriesRef.current,
+              history: historyRef.current
+            }
+          }));
         }
       };
 
       ws.onopen = () => {
-        isConnectingRef.current = false;
-        setIsConnecting(false);
-        setIsConnected(true);
-        ws.send(JSON.stringify({
-          init: {
-            ledger: ledgerRef.current,
-            mode: modeRef.current,
-            transactions: transactionsRef.current,
-            categories: categoriesRef.current,
-            history: historyRef.current
-          }
-        }));
+        wsOpened = true;
+        sendInitIfReady();
       };
 
       ws.onmessage = (event) => {
@@ -323,6 +277,66 @@ export function useLiveBookkeeper(ledger: string, mode: string, transactions: an
         setError('Connection error');
         stop();
       }
+
+      const inputAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+      inputAudioCtxRef.current = inputAudioCtx;
+      if (inputAudioCtx.state === 'suspended') {
+        inputAudioCtx.resume();
+      }
+      
+      const outputAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      outputAudioCtxRef.current = outputAudioCtx;
+      if (outputAudioCtx.state === 'suspended') {
+        outputAudioCtx.resume();
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        }
+      });
+      // If stop() was called while waiting for mic permissions, wsRef.current will be null.
+      if (!wsRef.current) {
+        stream.getTracks().forEach(t => t.stop());
+        return;
+      }
+      streamRef.current = stream;
+      micGranted = true;
+      sendInitIfReady();
+
+      // Safety net: if the WebSocket/Gemini Live handshake stalls after the mic
+      // permission is granted, the connect guard above would otherwise leave the
+      // hook permanently stuck (wsRef/isConnectingRef never reset, mic button
+      // silently does nothing on further clicks) until the page is refreshed.
+      if (!serverReady) {
+        connectTimeoutRef.current = setTimeout(() => {
+          console.error('Live session connection timed out');
+          setError('Connection timed out. Please try again.');
+          stop();
+        }, CONNECT_TIMEOUT_MS);
+      }
+
+      const source = inputAudioCtx.createMediaStreamSource(stream);
+      const processor = inputAudioCtx.createScriptProcessor(4096, 1, 1);
+      processorRef.current = processor;
+
+      source.connect(processor);
+      processor.connect(inputAudioCtx.destination);
+
+      processor.onaudioprocess = (e) => {
+        if (ws.readyState === WebSocket.OPEN && serverReady) {
+          // Prevent echo: don't send audio if the assistant is currently speaking
+          const isSpeaking = outputAudioCtxRef.current && 
+                             outputAudioCtxRef.current.state === 'running' && 
+                             nextStartTimeRef.current > outputAudioCtxRef.current.currentTime;
+          if (!isSpeaking) {
+            const base64 = pcmToBase64(e.inputBuffer.getChannelData(0));
+            ws.send(JSON.stringify({ audio: base64 }));
+          }
+        }
+      };
 
     } catch (err: any) {
       console.error(err);
