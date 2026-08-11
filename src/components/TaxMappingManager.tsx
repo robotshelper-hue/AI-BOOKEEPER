@@ -63,8 +63,8 @@ export default function TaxMappingManager() {
               businessCategoryId: cat.id!,
               businessCategoryName: cat.name,
               taxYear: currentYear,
-              taxForm: cat.type === 'Income' ? 'Schedule C' : 'Schedule C',
-              taxSection: cat.type === 'Income' ? 'Part I - Income' : 'Part II - Expenses',
+              taxForm: '',
+              taxSection: '',
               taxCategory: '',
               taxActMapping: '',
               status: 'Not Verified',
@@ -145,8 +145,23 @@ export default function TaxMappingManager() {
               <tr key={mapping.businessCategoryId} className="hover:bg-gray-50 transition-colors">
                 <td className="px-4 py-3 font-medium text-gray-900">
                   {mapping.businessCategoryName}
-                  <div className="text-xs text-gray-500 font-normal mt-0.5">
-                    {mapping.taxForm} / {mapping.taxSection}
+                  <div className="flex gap-1.5 mt-1.5">
+                    <input
+                      type="text"
+                      value={mapping.taxForm}
+                      onChange={(e) => setMappings(mappings.map(m => m.businessCategoryId === mapping.businessCategoryId ? { ...m, taxForm: e.target.value } : m))}
+                      onBlur={(e) => handleUpdate(mapping, { taxForm: e.target.value })}
+                      placeholder="Tax Form (e.g. Schedule C)"
+                      className="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs font-normal px-2 py-1 border"
+                    />
+                    <input
+                      type="text"
+                      value={mapping.taxSection}
+                      onChange={(e) => setMappings(mappings.map(m => m.businessCategoryId === mapping.businessCategoryId ? { ...m, taxSection: e.target.value } : m))}
+                      onBlur={(e) => handleUpdate(mapping, { taxSection: e.target.value })}
+                      placeholder="Tax Section"
+                      className="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-xs font-normal px-2 py-1 border"
+                    />
                   </div>
                 </td>
                 <td className="px-4 py-3">

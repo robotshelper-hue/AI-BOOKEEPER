@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { collection, query, where, getDocs, orderBy, updateDoc, doc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { CategoryDocument, TaxMappingDocument } from '../types';
+import { getTransactionLabel, getTransactionEntity, getTransactionEntityLabel, getTransactionDescriptionCell } from '../lib/transactionDisplay';
 import { AlertCircle, CheckCircle2, Download, Filter, ChevronRight, FileText } from 'lucide-react';
 
 export default function TaxCenter() {
@@ -149,7 +150,7 @@ export default function TaxCenter() {
         tx.type,
         tx.amount,
         tx.currency || 'USD',
-        (tx.type === 'Income' ? tx.client : tx.vendor) || '',
+        `"${((tx.type === 'Income' ? tx.client : tx.vendor) || '').replace(/"/g, '""')}"`,
         `"${(tx.description || '').replace(/"/g, '""')}"`,
         `"${tx.category || ''}"`,
         `"${isVerified ? (mapping.taxCategory || '') : ''}"`,
@@ -289,11 +290,16 @@ export default function TaxCenter() {
                   return (
                     <li key={tx.id} className="p-4 flex flex-col sm:flex-row justify-between sm:items-center gap-4 hover:bg-gray-50 transition-colors">
                       <div>
-                        <div className="font-medium text-gray-900">{tx.description || 'No Description'}</div>
+                        <div className="font-medium text-gray-900">{getTransactionLabel(tx)}</div>
                         <div className="text-sm text-gray-500 mt-1 flex flex-wrap gap-x-4">
                           <span>{tx.date || (tx.timestamp ? new Date(tx.timestamp).toISOString().split('T')[0] : 'No Date')}</span>
                           <span className="font-medium text-gray-700">${tx.amount != null ? Number(tx.amount).toFixed(2) : 'N/A'}</span>
                           <span className="text-red-600 font-medium text-xs bg-red-50 px-2 py-0.5 rounded-md border border-red-100">{issue}</span>
+                          {getTransactionEntity(tx) && (
+                            <span className="text-xs bg-gray-100 px-2 py-0.5 rounded-md text-gray-600 border border-gray-200">
+                              {getTransactionEntityLabel(tx)}: {getTransactionEntity(tx)}
+                            </span>
+                          )}
                           <span className="text-xs bg-gray-100 px-2 py-0.5 rounded-md text-gray-600 border border-gray-200">
                             Category: {tx.category || 'None'}
                           </span>
@@ -353,7 +359,7 @@ export default function TaxCenter() {
                   <tr key={tx.id}>
                     <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{tx.date || new Date(tx.timestamp).toISOString().split('T')[0]}</td>
                     <td className="px-4 py-3 font-medium text-gray-900">{tx.client || '-'}</td>
-                    <td className="px-4 py-3">{tx.description}</td>
+                    <td className="px-4 py-3">{getTransactionDescriptionCell(tx)}</td>
                     <td className="px-4 py-3 text-gray-600">{tx.category}</td>
                     <td className="px-4 py-3 text-right font-medium text-green-600">${Number(tx.amount).toFixed(2)}</td>
                   </tr>
@@ -389,7 +395,7 @@ export default function TaxCenter() {
                     <tr key={tx.id}>
                       <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{tx.date || new Date(tx.timestamp).toISOString().split('T')[0]}</td>
                       <td className="px-4 py-3 font-medium text-gray-900">{tx.vendor || '-'}</td>
-                      <td className="px-4 py-3">{tx.description}</td>
+                      <td className="px-4 py-3">{getTransactionDescriptionCell(tx)}</td>
                       <td className="px-4 py-3 text-gray-600">{tx.category}</td>
                       <td className="px-4 py-3 text-indigo-600">{mapping?.taxCategory || '-'}</td>
                       <td className="px-4 py-3 text-right font-medium text-gray-900">${Number(tx.amount).toFixed(2)}</td>
