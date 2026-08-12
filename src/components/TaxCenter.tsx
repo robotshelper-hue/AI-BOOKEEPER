@@ -26,6 +26,7 @@ export default function TaxCenter() {
   const [exportEndDate, setExportEndDate] = useState<string>('');
   const [exportCategory, setExportCategory] = useState<string>('');
   const [exportType, setExportType] = useState<'All' | 'Income' | 'Expenses'>('All');
+  const [exportFormat, setExportFormat] = useState<'standard' | 'verified_only' | 'no_tax'>('standard');
 
   const availableYears = Array.from({ length: 5 }, (_, i) => (new Date().getFullYear() - 2 + i).toString());
 
@@ -121,12 +122,12 @@ export default function TaxCenter() {
   });
 
   const exportCSV = () => {
-    // CSV Export logic
-    const headers = [
-      'Date', 'Tax Year', 'Transaction Type', 'Amount', 'Currency', 
-      'Vendor/Client', 'Description', 'Category', 'Tax Category', 
-      'Tax Form', 'Tax Section', 'TaxAct Mapping', 'Notes'
-    ].join(',');
+    // Determine headers based on export format
+    const baseHeaders = ['Date', 'Tax Year', 'Transaction Type', 'Amount', 'Currency', 'Vendor/Client', 'Description', 'Category'];
+    const taxHeaders = ['Tax Category', 'Tax Form', 'Tax Section', 'TaxAct Mapping'];
+    const finalHeaders = exportFormat === 'no_tax' 
+      ? [...baseHeaders, 'Notes'] 
+      : [...baseHeaders, ...taxHeaders, 'Notes'];
 
     const txsToExport = yearTxs.filter(tx => {
       const txDate = tx.date || new Date(tx.timestamp).toISOString().split('T')[0];
@@ -135,16 +136,21 @@ export default function TaxCenter() {
       if (exportCategory && tx.category !== exportCategory && tx.categoryId !== exportCategory) return false;
       if (exportStartDate && txDate < exportStartDate) return false;
       if (exportEndDate && txDate > exportEndDate) return false;
+      
+      // Filter for Verified Tax CSV option
+      if (exportFormat === 'verified_only') {
+        const mapping = mappings[tx.category] || mappings[tx.categoryId];
+        if (!mapping || mapping.status !== 'Verified') return false;
+      }
       return true;
     });
 
     const rows = txsToExport.map(tx => {
       const txYear = tx.date ? tx.date.substring(0, 4) : new Date(tx.timestamp).getFullYear().toString();
       const mapping = mappings[tx.category] || mappings[tx.categoryId] || {} as Partial<TaxMappingDocument>;
-      // Priority 8: Only include tax mapping fields if the mapping is Verified
       const isVerified = mapping.status === 'Verified';
       
-      const cols = [
+      const baseCols = [
         tx.date || new Date(tx.timestamp).toISOString().split('T')[0],
         txYear,
         tx.type,
@@ -152,21 +158,30 @@ export default function TaxCenter() {
         tx.currency || 'USD',
         `"${((tx.type === 'Income' ? tx.client : tx.vendor) || '').replace(/"/g, '""')}"`,
         `"${(tx.description || '').replace(/"/g, '""')}"`,
-        `"${tx.category || ''}"`,
+        `"${tx.category || ''}"`
+      ];
+
+      const taxCols = exportFormat === 'no_tax' ? [] : [
         `"${isVerified ? (mapping.taxCategory || '') : ''}"`,
         `"${isVerified ? (mapping.taxForm || '') : ''}"`,
         `"${isVerified ? (mapping.taxSection || '') : ''}"`,
-        `"${isVerified ? (mapping.taxActMapping || '') : ''}"`,
-        `"${tx.notes || ''}"`
+        `"${isVerified ? (mapping.taxActMapping || '') : ''}"`
       ];
+
+      const cols = [...baseCols, ...taxCols, `"${tx.notes || ''}"`];
       return cols.join(',');
     });
 
-    const csvContent = "data:text/csv;charset=utf-8," + [headers, ...rows].join('\n');
+    const csvContent = "data:text/csv;charset=utf-8," + [finalHeaders.join(','), ...rows].join('\n');
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `Business_Tax_Preparation_${taxYear}.csv`);
+    
+    let filename = `Business_Tax_Preparation_${taxYear}.csv`;
+    if (exportFormat === 'verified_only') filename = `Verified_Tax_Transactions_${taxYear}.csv`;
+    if (exportFormat === 'no_tax') filename = `Business_Transactions_${taxYear}.csv`;
+    
+    link.setAttribute("download", filename);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -419,8 +434,16 @@ export default function TaxCenter() {
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-left max-w-lg mx-auto mb-8 bg-gray-50 p-4 rounded-lg border border-gray-200">
+            <div className="sm:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Export Format</label>
+              <select value={exportFormat} onChange={e => setExportFormat(e.target.value as any)} className="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm px-3 py-2 border bg-white font-medium">
+                <option value="standard">Business Tax Preparation CSV (Standard)</option>
+                <option value="verified_only">Reviewed/Verified Tax CSV (Only Verified Mappings)</option>
+                <option value="no_tax">Full Business Transaction CSV (No Tax Data)</option>
+              </select>
+            </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Export Type</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Transaction Type</label>
               <select value={exportType} onChange={e => setExportType(e.target.value as any)} className="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm px-3 py-2 border bg-white">
                 <option value="All">All Transactions</option>
                 <option value="Income">Income Only</option>
@@ -464,7 +487,7 @@ export default function TaxCenter() {
             className="inline-flex items-center justify-center px-6 py-3 border border-transparent text-base font-medium rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm transition-colors"
           >
             <Download className="w-5 h-5 mr-2" />
-            Download {taxYear} Business Tax Preparation CSV
+            Download {taxYear} CSV
           </button>
           
           <p className="text-xs text-gray-400 mt-6 max-w-md mx-auto">

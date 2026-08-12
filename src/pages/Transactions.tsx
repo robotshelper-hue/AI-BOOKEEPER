@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { db } from '../lib/firebase';
 import { collection, query, where, getDocs, orderBy, deleteDoc, doc } from 'firebase/firestore';
 import { useAuth } from '../contexts/AuthContext';
-import { Receipt, Search, Filter, Trash2 } from 'lucide-react';
+import { Receipt, Search, Filter, Trash2, UploadCloud } from 'lucide-react';
 
 export default function Transactions() {
   const { ledger } = useParams<{ ledger: string }>();
   const { currentUser } = useAuth();
+  const navigate = useNavigate();
   const [transactions, setTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -68,6 +69,13 @@ export default function Transactions() {
             Manage and view all your {ledger} transactions.
           </p>
         </div>
+        <button
+          onClick={() => navigate(`/ledger/${ledger}/import`)}
+          className="flex items-center px-4 py-2.5 text-sm font-semibold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors shadow-sm gap-2"
+        >
+          <UploadCloud className="w-4 h-4" />
+          Import CSV
+        </button>
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">

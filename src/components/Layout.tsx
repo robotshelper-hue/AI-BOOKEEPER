@@ -11,7 +11,8 @@ import {
   BarChart3,
   FileText,
   Users,
-  Repeat
+  Repeat,
+  UploadCloud
 } from 'lucide-react';
 import { auth } from '../lib/firebase';
 import { signOut } from 'firebase/auth';
@@ -29,6 +30,7 @@ export default function Layout() {
   const navItems = [
     { name: 'AI Hub', path: `/ledger/${ledger}`, icon: Bot, exact: true },
     { name: 'Transactions', path: `/ledger/${ledger}/transactions`, icon: Receipt },
+    { name: 'Import CSV', path: `/ledger/${ledger}/import`, icon: UploadCloud },
     { name: 'Recurring', path: `/ledger/${ledger}/recurring`, icon: Repeat },
     { name: 'Analytics', path: `/ledger/${ledger}/analytics`, icon: BarChart3 },
     ...(isBusiness ? [

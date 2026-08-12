@@ -91,6 +91,71 @@ async function startServer() {
   });
 
   // --- Vite Middleware ---
+  // --- Batch Category Suggestions (Module 4) ---
+  app.post('/api/gemini/suggest-categories', async (req, res) => {
+    try {
+      const { rows, categories, ledger } = req.body;
+
+      if (!rows || !Array.isArray(rows) || rows.length === 0) {
+        return res.status(400).json({ error: 'Missing or empty rows array' });
+      }
+      if (!categories || !Array.isArray(categories)) {
+        return res.status(400).json({ error: 'Missing categories array' });
+      }
+
+      if (!process.env.GEMINI_API_KEY) {
+         return res.status(500).json({ error: 'Server configuration error: GEMINI_API_KEY is missing.' });
+      }
+
+      const prompt = `You are an AI Bookkeeper categorizing a batch of imported CSV transactions for a ${ledger} ledger.
+      
+      Here are the available bookkeeping categories:
+      ${categories.map((c: any) => `- ${c.name} (${c.type})`).join('\n')}
+      
+      CRITICAL CONSTRAINT: You must ONLY suggest categories from the list above. DO NOT suggest Tax mappings or tax-related codes. If you are not highly confident, return null for the category.
+      
+      Here are the transactions to categorize:
+      ${rows.map((r: any, i: number) => `[ID: ${i}] Date: ${r.date}, Type: ${r.type}, Amount: ${r.amount}, Vendor: ${r.vendor}, Desc: ${r.description}`).join('\n')}
+      
+      Return a JSON array of objects, where each object has:
+      - "index": the ID of the transaction
+      - "category": the exact name of the suggested category (or null if uncertain)
+      - "confidence": a number from 0 to 1 indicating your confidence
+      `;
+
+      const ai = getAiClient();
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.1-flash-lite',
+        contents: prompt,
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: 'ARRAY',
+            items: {
+              type: 'OBJECT',
+              properties: {
+                index: { type: 'INTEGER' },
+                category: { type: 'STRING', nullable: true },
+                confidence: { type: 'NUMBER' },
+              },
+              required: ['index', 'category', 'confidence'],
+            }
+          }
+        }
+      });
+
+      if (!response.text) {
+        throw new Error('No text returned from Gemini');
+      }
+
+      const suggestions = JSON.parse(response.text);
+      res.json({ suggestions });
+    } catch (error: any) {
+      console.error('Error suggesting categories:', error);
+      res.status(500).json({ error: 'Failed to generate category suggestions' });
+    }
+  });
+
   app.post('/api/gemini/accountant', async (req, res) => {
     try {
       const { query, ledger, transactions } = req.body;

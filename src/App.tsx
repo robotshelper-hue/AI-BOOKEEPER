@@ -11,6 +11,7 @@ import LedgerSelection from './pages/LedgerSelection';
 import Dashboard from './pages/Dashboard';
 import Transactions from './pages/Transactions';
 import RecurringTransactions from './pages/RecurringTransactions';
+import ImportTransactions from './pages/ImportTransactions';
 import Analytics from './pages/Analytics';
 import Clients from './pages/Clients';
 import Invoices from './pages/Invoices';
@@ -35,6 +36,7 @@ export default function App() {
                 <Route index element={<Dashboard />} />
                 <Route path="transactions" element={<Transactions />} />
                 <Route path="recurring" element={<RecurringTransactions />} />
+                <Route path="import" element={<ImportTransactions />} />
                 <Route path="analytics" element={<Analytics />} />
                 <Route path="clients" element={<Clients />} />
                 <Route path="invoices" element={<Invoices />} />
