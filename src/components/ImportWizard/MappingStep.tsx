@@ -41,6 +41,12 @@ const FIELD_STYLES: Record<
     badge: 'bg-sky-100 text-sky-700 border-sky-200',
     dot: 'bg-sky-500',
   },
+  category: {
+    border: 'border-l-teal-500',
+    bg: 'bg-teal-50/60',
+    badge: 'bg-teal-100 text-teal-700 border-teal-200',
+    dot: 'bg-teal-500',
+  },
   description: {
     border: 'border-l-violet-500',
     bg: 'bg-violet-50/60',

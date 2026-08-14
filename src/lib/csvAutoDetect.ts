@@ -12,6 +12,7 @@
 export type BookkeepingField =
   | 'date'
   | 'vendor'
+  | 'category'
   | 'description'
   | 'amount'
   | 'debit'
@@ -61,6 +62,12 @@ export const FIELD_META: Record<
     required: false,
     group: 'optional',
   },
+  category: {
+    label: 'Category',
+    description: 'Pre-assigned transaction category',
+    required: false,
+    group: 'optional',
+  },
   description: {
     label: 'Description / Memo',
     description: 'Transaction notes or narrative',
@@ -91,7 +98,11 @@ const HINTS: Record<BookkeepingField, string[]> = {
   ],
   vendor: [
     'vendor', 'payee', 'merchant', 'merchant name', 'counterpart',
-    'beneficiary', 'party', 'payer', 'recipient',
+    'beneficiary', 'party', 'payer', 'recipient', 'vendor/client', 'client',
+  ],
+  category: [
+    'category', 'cat', 'categories', 'category name', 'expense category',
+    'income category', 'classification', 'account',
   ],
   description: [
     'description', 'memo', 'narrative', 'details', 'transaction description',
@@ -148,9 +159,9 @@ export function autoDetectMappings(headers: string[]): Record<string, Bookkeepin
   const mapping: Record<string, BookkeepingField> = {};
   const usedHeaders = new Set<string>();
 
-  // Detection priority: date → debit → credit → amount → vendor → description → notes
+  // Detection priority: date → debit → credit → amount → vendor → category → description → notes
   const DETECTION_ORDER: BookkeepingField[] = [
-    'date', 'debit', 'credit', 'amount', 'vendor', 'description', 'notes',
+    'date', 'debit', 'credit', 'amount', 'vendor', 'category', 'description', 'notes',
   ];
 
   for (const field of DETECTION_ORDER) {

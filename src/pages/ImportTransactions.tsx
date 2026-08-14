@@ -214,13 +214,15 @@ function ResultStep({
   const { currentUser } = useAuth();
   const [status, setStatus] = useState<'importing' | 'success' | 'error'>('importing');
   const [error, setError] = useState<string | null>(null);
+  const hasImportedRef = React.useRef(false);
 
   // Normalize: URL param 'business' → Firestore value 'Business'
   const normalizedLedger = ledger.charAt(0).toUpperCase() + ledger.slice(1).toLowerCase();
 
   useEffect(() => {
-    let isMounted = true;
     if (!currentUser) return;
+    if (hasImportedRef.current) return;
+    hasImportedRef.current = true;
 
     async function performImport() {
       try {
@@ -244,20 +246,16 @@ function ResultStep({
           )
         );
 
-        if (isMounted) setStatus('success');
+        setStatus('success');
       } catch (err: any) {
         console.error('Import error:', err);
-        if (isMounted) {
-          setStatus('error');
-          setError(err.message || 'Failed to write to database.');
-        }
+        setStatus('error');
+        setError(err.message || 'Failed to write to database.');
       }
     }
 
     performImport();
-
-    return () => { isMounted = false; };
-  }, [ledger, rows]);
+  }, [ledger, rows, currentUser, normalizedLedger]);
 
   if (status === 'importing') {
     return (

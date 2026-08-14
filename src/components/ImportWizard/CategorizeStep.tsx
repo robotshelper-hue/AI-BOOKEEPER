@@ -70,12 +70,17 @@ export default function CategorizeStep({
     if (!categoriesLoadedRef.current) return; // Wait for initial load
     if (processedRef.current) return; // Don't re-process
 
-    async function processRows() {
+    // To prevent a race condition where onSnapshot fires immediately with an empty array
+    // before the server syncs, we add a slight delay if categories is empty.
+    const processTimeout = setTimeout(async () => {
+      if (processedRef.current) return;
+      processedRef.current = true;
+      
       try {
         setLoading(true);
         
         setProgressText('Detecting duplicates...');
-        const duplicates = await detectDuplicates(normalizationResult.rows, ledger);
+        const duplicates = await detectDuplicates(normalizationResult.rows, ledger, currentUser?.uid);
 
         setProgressText('AI Bookkeeper is categorizing transactions...');
         const suggestions = await suggestCategories(normalizationResult.rows, categories, ledger);
@@ -88,15 +93,26 @@ export default function CategorizeStep({
           const isDup = duplicates.has(row.rawIndex);
           const hasError = row.errors.length > 0;
           
-          let selectedCat = sug?.category || 'Uncategorized';
-          if (!categories.find(c => c.name === selectedCat && c.type === row.type)) {
-             selectedCat = 'Uncategorized';
+          // Check if category was provided in the CSV and matches an existing category in Firestore
+          let directCsvCat: string | null = null;
+          if (row.category) {
+            const matched = categories.find(
+              (c) => c.name.trim().toLowerCase() === row.category!.trim().toLowerCase() && c.type === row.type
+            );
+            if (matched) {
+              directCsvCat = matched.name;
+            }
+          }
+
+          let selectedCat = directCsvCat || sug?.category || 'Uncategorized';
+          if (!categories.find((c) => c.name === selectedCat && c.type === row.type)) {
+            selectedCat = 'Uncategorized';
           }
 
           return {
             ...row,
-            suggestedCategory: sug?.category || null,
-            confidence: sug?.confidence || 0,
+            suggestedCategory: directCsvCat || sug?.category || null,
+            confidence: directCsvCat ? 1 : (sug?.confidence || 0),
             isDuplicate: isDup,
             selectedCategory: selectedCat,
             import: !isDup && !hasError, // Auto-uncheck errors and duplicates
@@ -110,26 +126,38 @@ export default function CategorizeStep({
       } catch (err) {
         console.error(err);
         if (isMounted) {
-          // Fallback if AI fails: just load rows without AI
-          const enriched: ImportRowWithAI[] = normalizationResult.rows.map((row) => ({
-            ...row,
-            suggestedCategory: null,
-            confidence: 0,
-            isDuplicate: false, // We skip duplicate detection on error for safety, or we could keep it.
-            selectedCategory: 'Uncategorized',
-            import: row.errors.length === 0,
-          }));
+          // Fallback if AI fails: check direct CSV category, otherwise Uncategorized
+          const enriched: ImportRowWithAI[] = normalizationResult.rows.map((row) => {
+            let directCsvCat: string | null = null;
+            if (row.category) {
+              const matched = categories.find(
+                (c) => c.name.trim().toLowerCase() === row.category!.trim().toLowerCase() && c.type === row.type
+              );
+              if (matched) {
+                directCsvCat = matched.name;
+              }
+            }
+
+            return {
+              ...row,
+              suggestedCategory: directCsvCat,
+              confidence: directCsvCat ? 1 : 0,
+              isDuplicate: false,
+              selectedCategory: directCsvCat || 'Uncategorized',
+              import: row.errors.length === 0,
+            };
+          });
           setRows(enriched);
           setLoading(false);
         }
       }
-    }
+    }, categories.length === 0 ? 1500 : 0);
 
-    if (!processedRef.current) {
-      processedRef.current = true;
-      processRows();
-    }
-  }, [categories, normalizationResult.rows, ledger, rows.length]);
+    return () => {
+      isMounted = false;
+      clearTimeout(processTimeout);
+    };
+  }, [normalizedLedger, normalizationResult, categories, currentUser, ledger]);
 
   const toggleImport = (rawIndex: number) => {
     setRows(rows.map(r => r.rawIndex === rawIndex ? { ...r, import: !r.import } : r));

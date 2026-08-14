@@ -67,36 +67,48 @@ export async function suggestCategories(
  */
 export async function detectDuplicates(
   rows: NormalizedRow[],
-  ledger: string
+  ledger: string,
+  userId?: string
 ): Promise<Set<number>> {
   const duplicates = new Set<number>();
   
-  // To avoid hitting Firebase for every row, we can query recent transactions or do it in batches.
-  // For simplicity and safety in this implementation, we query by date.
-  // We'll collect all unique dates from the import.
-  const uniqueDates = Array.from(new Set(rows.map((r) => r.date).filter(Boolean)));
-  
-  if (uniqueDates.length === 0) return duplicates;
+  const validRows = rows.filter((r) => r.errors.length === 0);
+  if (validRows.length === 0) return duplicates;
 
-  // Since we can't 'in' query more than 10 dates easily, we'll fetch them individually or all transactions for this ledger if it's small.
-  // For now, let's fetch all transactions for this ledger and do client-side filtering. 
-  // (In a massive production app, we would query by date chunks).
-  // Normalize: URL param 'business' → Firestore value 'Business'
-  const normalizedLedger = ledger.charAt(0).toUpperCase() + ledger.slice(1).toLowerCase();
-  const q = query(collection(db, 'Transactions'), where('ledger', '==', normalizedLedger));
-  const snapshot = await getDocs(q);
-  const existingTransactions = snapshot.docs.map(doc => doc.data() as TransactionDocument);
+  let existingTransactions: TransactionDocument[] = [];
+  try {
+    const normalizedLedger = ledger.charAt(0).toUpperCase() + ledger.slice(1).toLowerCase();
+    const constraints: any[] = [where('ledger', '==', normalizedLedger)];
+    if (userId) {
+      constraints.push(where('userId', '==', userId));
+    }
+    const q = query(collection(db, 'Transactions'), ...constraints);
+    const snapshot = await getDocs(q);
+    existingTransactions = snapshot.docs.map((doc) => doc.data() as TransactionDocument);
+  } catch (e) {
+    console.error('Failed to fetch existing transactions for duplicate check:', e);
+  }
+
+  // Track occurrences within this import batch and match against existing DB transactions
+  const seenInBatch = new Map<string, number>();
 
   for (const row of rows) {
     if (row.errors.length > 0) continue;
 
-    const isDup = existingTransactions.some((t) => 
+    const rowKey = `${row.date}_${row.amount.toFixed(2)}_${row.type}_${(row.vendor || '').trim().toLowerCase()}`;
+    const batchCount = seenInBatch.get(rowKey) || 0;
+    seenInBatch.set(rowKey, batchCount + 1);
+
+    const isIntraBatchDuplicate = batchCount > 0;
+
+    const isDbDuplicate = existingTransactions.some((t) => 
       t.date === row.date && 
       Math.abs(t.amount - row.amount) < 0.01 && 
-      t.type === row.type
+      t.type === row.type &&
+      (!row.vendor || !t.vendor || t.vendor.trim().toLowerCase() === row.vendor.trim().toLowerCase())
     );
 
-    if (isDup) {
+    if (isIntraBatchDuplicate || isDbDuplicate) {
       duplicates.add(row.rawIndex);
     }
   }

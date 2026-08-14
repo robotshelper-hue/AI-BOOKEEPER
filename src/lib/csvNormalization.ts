@@ -40,6 +40,7 @@ export interface NormalizedRow {
   amount: number;                // always positive
   type: 'Income' | 'Expense';
   vendor: string | null;
+  category: string | null;
   description: string | null;
   notes: string | null;
   rawIndex: number;              // 0-based row index in the original CSV
@@ -243,6 +244,7 @@ function normalizeRow(
 
   // ── Optional fields ────────────────────────────────────────────────────────
   const vendor      = fieldValue(raw, mapping, 'vendor') || null;
+  const category    = fieldValue(raw, mapping, 'category') || null;
   const description = fieldValue(raw, mapping, 'description') || null;
   const notes       = fieldValue(raw, mapping, 'notes') || null;
 
@@ -251,6 +253,7 @@ function normalizeRow(
     amount,
     type,
     vendor,
+    category,
     description,
     notes,
     rawIndex: index,
