@@ -233,13 +233,14 @@ function ResultStep({
             addDoc(transactionsRef, {
               userId: currentUser!.uid,
               ledger: normalizedLedger,
+              currency: normalizedLedger === 'Business' ? 'USD' : 'PHP',
               date: row.date,
               type: row.type,
               amount: row.amount,
               category: row.selectedCategory,
-              client: row.type === 'Income' ? row.vendor : null,
-              vendor: row.type === 'Expense' ? row.vendor : null,
-              notes: row.notes || row.description || '',
+              client: row.type === 'Income' ? (row.vendor || row.description || null) : null,
+              vendor: row.type === 'Expense' ? (row.vendor || row.description || null) : null,
+              notes: row.notes || (row.vendor ? row.description : row.description) || '',
               timestamp: Date.now(),
               // No tax mappings are set here, strictly bookkeeping
             })

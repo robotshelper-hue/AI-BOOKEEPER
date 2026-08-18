@@ -47,6 +47,7 @@ export default function CategorizeStep({
 
   // Normalize: URL param 'business' → Firestore value 'Business'
   const normalizedLedger = ledger.charAt(0).toUpperCase() + ledger.slice(1).toLowerCase();
+  const currencySymbol = normalizedLedger === 'Personal' ? '₱' : '$';
 
   // Load categories
   useEffect(() => {
@@ -185,6 +186,7 @@ export default function CategorizeStep({
   const duplicateCount = rows.filter(r => r.isDuplicate).length;
   const importCount = rows.filter(r => r.import).length;
   const errorCount = rows.filter(r => r.errors.length > 0).length;
+  const needsReviewCount = rows.filter(r => r.selectedCategory === 'Uncategorized').length;
 
   return (
     <div className="space-y-5">
@@ -202,6 +204,12 @@ export default function CategorizeStep({
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center">
             <p className="text-2xl font-bold text-amber-700">{duplicateCount}</p>
             <p className="text-xs text-amber-600 mt-0.5">Duplicates Skipped</p>
+          </div>
+        )}
+        {needsReviewCount > 0 && (
+          <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 text-center">
+            <p className="text-2xl font-bold text-orange-700">{needsReviewCount}</p>
+            <p className="text-xs text-orange-600 mt-0.5">Needs Review</p>
           </div>
         )}
         {errorCount > 0 && (
@@ -265,10 +273,15 @@ export default function CategorizeStep({
                         <AlertTriangle className="w-3 h-3" /> Possible Duplicate
                       </div>
                     )}
+                    {!row.isDuplicate && row.selectedCategory === 'Uncategorized' && (
+                      <div className="text-[10px] text-orange-600 font-semibold flex items-center gap-1 mt-0.5">
+                        <AlertTriangle className="w-3 h-3" /> Needs Review
+                      </div>
+                    )}
                   </td>
                   <td className="px-3 py-2 text-right">
                     <div className="font-semibold text-gray-900">
-                      ${row.amount.toFixed(2)}
+                      {currencySymbol}{row.amount.toFixed(2)}
                     </div>
                     <span className={`px-1.5 py-0.5 rounded-full font-semibold text-[10px] inline-block mt-0.5 ${
                       row.type === 'Income'

@@ -173,6 +173,21 @@ function resolveType(
   return rawAmount >= 0 ? 'Expense' : 'Income';
 }
 
+const EXPENSE_TYPE_WORDS = ['debit', 'withdrawal', 'expense', 'dr', 'charge', 'payment', 'spend', 'purchase', 'sent'];
+const INCOME_TYPE_WORDS = ['credit', 'deposit', 'income', 'cr', 'received', 'receive', 'incoming'];
+
+/**
+ * Classifies a "Type" column's raw value (e.g. "Debit", "Credit") into Income/Expense.
+ * Returns null if the value doesn't match any known word, so callers can fall back safely.
+ */
+function classifyTypeValue(raw: string): 'Income' | 'Expense' | null {
+  const v = raw.trim().toLowerCase();
+  if (!v) return null;
+  if (EXPENSE_TYPE_WORDS.some((w) => v === w || v.includes(w))) return 'Expense';
+  if (INCOME_TYPE_WORDS.some((w) => v === w || v.includes(w))) return 'Income';
+  return null;
+}
+
 /** Returns the raw string value for a given BookkeepingField from a CSV row. */
 function fieldValue(
   row: Record<string, string>,
@@ -206,8 +221,25 @@ function normalizeRow(
   let type: 'Income' | 'Expense' = 'Expense';
   const mappedFields = Object.values(mapping);
 
-  if (mappedFields.includes('amount')) {
-    // Single amount column
+  if (mappedFields.includes('amount') && mappedFields.includes('type')) {
+    // Single amount column + a per-row Type indicator (e.g. "Debit"/"Credit") that decides polarity
+    const rawAmt = fieldValue(raw, mapping, 'amount');
+    const parsed = parseAmount(rawAmt);
+    if (parsed === null) {
+      errors.push(`Cannot parse amount: "${rawAmt || '(empty)'}"`);
+    } else {
+      const rawType = fieldValue(raw, mapping, 'type');
+      const classified = classifyTypeValue(rawType);
+      if (classified === null) {
+        errors.push(`Cannot classify Type value: "${rawType || '(empty)'}" as Debit/Credit.`);
+      } else {
+        type = classified;
+        amount = Math.abs(parsed);
+        if (amount === 0) warnings.push('Amount is zero — please verify this row.');
+      }
+    }
+  } else if (mappedFields.includes('amount')) {
+    // Single amount column, sign decides polarity
     const rawAmt = fieldValue(raw, mapping, 'amount');
     const parsed = parseAmount(rawAmt);
     if (parsed === null) {

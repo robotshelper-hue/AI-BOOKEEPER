@@ -71,11 +71,23 @@ const FIELD_STYLES: Record<
     badge: 'bg-emerald-100 text-emerald-700 border-emerald-200',
     dot: 'bg-emerald-500',
   },
+  type: {
+    border: 'border-l-fuchsia-500',
+    bg: 'bg-fuchsia-50/60',
+    badge: 'bg-fuchsia-100 text-fuchsia-700 border-fuchsia-200',
+    dot: 'bg-fuchsia-500',
+  },
   notes: {
     border: 'border-l-gray-400',
     bg: 'bg-gray-50/40',
     badge: 'bg-gray-100 text-gray-600 border-gray-200',
     dot: 'bg-gray-400',
+  },
+  needs_mapping: {
+    border: 'border-l-amber-400',
+    bg: 'bg-amber-50/60',
+    badge: 'bg-amber-100 text-amber-700 border-amber-200',
+    dot: 'bg-amber-400',
   },
   ignore: {
     border: 'border-l-gray-200',
@@ -95,8 +107,9 @@ function StatsBar({
   mapping: Record<string, BookkeepingField>;
 }) {
   const values = Object.values(mapping);
-  const mapped = values.filter((v) => v !== 'ignore').length;
+  const mapped = values.filter((v) => v !== 'ignore' && v !== 'needs_mapping').length;
   const ignored = values.filter((v) => v === 'ignore').length;
+  const needsMapping = values.filter((v) => v === 'needs_mapping').length;
 
   return (
     <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500">
@@ -108,6 +121,12 @@ function StatsBar({
         <span className="w-2 h-2 rounded-full bg-indigo-500" />
         {mapped} auto-mapped
       </span>
+      {needsMapping > 0 && (
+        <span className="flex items-center gap-1.5 bg-amber-50 text-amber-700 px-2.5 py-1 rounded-full border border-amber-200">
+          <span className="w-2 h-2 rounded-full bg-amber-400" />
+          {needsMapping} need mapping
+        </span>
+      )}
       {ignored > 0 && (
         <span className="flex items-center gap-1.5 bg-gray-50 text-gray-500 px-2.5 py-1 rounded-full border border-gray-200">
           <span className="w-2 h-2 rounded-full bg-gray-300" />
@@ -131,6 +150,7 @@ interface ColumnCardProps {
 function ColumnCard({ header, samples, field, usedFields, onChange }: ColumnCardProps) {
   const styles = FIELD_STYLES[field];
   const isIgnored = field === 'ignore';
+  const needsMapping = field === 'needs_mapping';
   const meta = FIELD_META[field];
 
   return (
@@ -147,7 +167,7 @@ function ColumnCard({ header, samples, field, usedFields, onChange }: ColumnCard
           </span>
           {!isIgnored && (
             <span
-              className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border flex-shrink-0 whitespace-nowrap ${styles.badge}`}
+              className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border flex-shrink-0 whitespace-nowrap ${styles.badge} ${needsMapping ? 'animate-pulse' : ''}`}
             >
               {meta.label}
             </span>
@@ -188,6 +208,9 @@ function ColumnCard({ header, samples, field, usedFields, onChange }: ColumnCard
             <option value="credit">
               Credit / Deposit{usedFields.has('credit') && field !== 'credit' ? ' (already mapped)' : ''}
             </option>
+            <option value="type">
+              Type — Debit/Credit indicator{usedFields.has('type') && field !== 'type' ? ' (already mapped)' : ''}
+            </option>
           </optgroup>
           <optgroup label="── Optional ──">
             <option value="vendor">
@@ -199,8 +222,12 @@ function ColumnCard({ header, samples, field, usedFields, onChange }: ColumnCard
             <option value="notes">
               Notes / Reference{usedFields.has('notes') && field !== 'notes' ? ' (already mapped)' : ''}
             </option>
+            <option value="category">
+              Category (pre-assigned in CSV){usedFields.has('category') && field !== 'category' ? ' (already mapped)' : ''}
+            </option>
           </optgroup>
           <optgroup label="──────────────">
+            <option value="needs_mapping">Needs Mapping — not sure yet</option>
             <option value="ignore">Ignore this column</option>
           </optgroup>
         </select>
@@ -369,12 +396,18 @@ export default function MappingStep({
       {/* Validation Status */}
       <ValidationBanner validation={validation} />
 
-      {/* Amount strategy panel — shown when single Amount column is mapped */}
-      {Object.values(mapping).includes('amount') && (
+      {/* Amount strategy panel — shown when single Amount column is mapped, unless a
+          Type (Debit/Credit indicator) column is also mapped, which decides polarity instead */}
+      {Object.values(mapping).includes('amount') && !Object.values(mapping).includes('type') && (
         <AmountStrategyPanel
           strategy={amountStrategy}
           onChange={onAmountStrategyChange}
         />
+      )}
+      {Object.values(mapping).includes('amount') && Object.values(mapping).includes('type') && (
+        <div className="rounded-xl border border-fuchsia-200 bg-fuchsia-50/40 p-4 text-xs text-fuchsia-700">
+          The mapped "Type" column will decide Income vs Expense per row (e.g. "Debit" → Expense, "Credit" → Income) — the Amount column's sign is ignored.
+        </div>
       )}
     </div>
   );

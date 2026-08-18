@@ -61,6 +61,51 @@ export async function suggestCategories(
 }
 
 /**
+ * Pure matching logic: given the rows being imported and a list of already-stored
+ * transactions, returns the set of rawIndex values considered possible duplicates
+ * (either against `existingTransactions` or against another row earlier in the same batch).
+ * Kept free of any Firestore I/O so it can be exercised directly in tests/scripts.
+ */
+export function findDuplicateIndices(
+  rows: NormalizedRow[],
+  existingTransactions: TransactionDocument[]
+): Set<number> {
+  const duplicates = new Set<number>();
+
+  // Track occurrences within this import batch and match against existing DB transactions
+  const seenInBatch = new Map<string, number>();
+
+  for (const row of rows) {
+    if (row.errors.length > 0) continue;
+
+    const rowKey = `${row.date}_${row.amount.toFixed(2)}_${row.type}_${(row.vendor || '').trim().toLowerCase()}`;
+    const batchCount = seenInBatch.get(rowKey) || 0;
+    seenInBatch.set(rowKey, batchCount + 1);
+
+    const isIntraBatchDuplicate = batchCount > 0;
+
+    const isDbDuplicate = existingTransactions.some((t) => {
+      // Income transactions store the counterpart in `client`, not `vendor` — compare the field
+      // that's actually populated for that type, or duplicate matching silently degrades to
+      // date+amount+type for every Income row.
+      const tCounterpart = t.type === 'Income' ? t.client : t.vendor;
+      return (
+        t.date === row.date &&
+        Math.abs(t.amount - row.amount) < 0.01 &&
+        t.type === row.type &&
+        (!row.vendor || !tCounterpart || tCounterpart.trim().toLowerCase() === row.vendor.trim().toLowerCase())
+      );
+    });
+
+    if (isIntraBatchDuplicate || isDbDuplicate) {
+      duplicates.add(row.rawIndex);
+    }
+  }
+
+  return duplicates;
+}
+
+/**
  * Checks a batch of rows against Firestore to find potential duplicates.
  * A row is considered a potential duplicate if a transaction in the SAME ledger
  * has the exact same date and amount.
@@ -70,10 +115,8 @@ export async function detectDuplicates(
   ledger: string,
   userId?: string
 ): Promise<Set<number>> {
-  const duplicates = new Set<number>();
-  
   const validRows = rows.filter((r) => r.errors.length === 0);
-  if (validRows.length === 0) return duplicates;
+  if (validRows.length === 0) return new Set<number>();
 
   let existingTransactions: TransactionDocument[] = [];
   try {
@@ -89,29 +132,5 @@ export async function detectDuplicates(
     console.error('Failed to fetch existing transactions for duplicate check:', e);
   }
 
-  // Track occurrences within this import batch and match against existing DB transactions
-  const seenInBatch = new Map<string, number>();
-
-  for (const row of rows) {
-    if (row.errors.length > 0) continue;
-
-    const rowKey = `${row.date}_${row.amount.toFixed(2)}_${row.type}_${(row.vendor || '').trim().toLowerCase()}`;
-    const batchCount = seenInBatch.get(rowKey) || 0;
-    seenInBatch.set(rowKey, batchCount + 1);
-
-    const isIntraBatchDuplicate = batchCount > 0;
-
-    const isDbDuplicate = existingTransactions.some((t) => 
-      t.date === row.date && 
-      Math.abs(t.amount - row.amount) < 0.01 && 
-      t.type === row.type &&
-      (!row.vendor || !t.vendor || t.vendor.trim().toLowerCase() === row.vendor.trim().toLowerCase())
-    );
-
-    if (isIntraBatchDuplicate || isDbDuplicate) {
-      duplicates.add(row.rawIndex);
-    }
-  }
-
-  return duplicates;
+  return findDuplicateIndices(rows, existingTransactions);
 }

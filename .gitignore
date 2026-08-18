@@ -6,3 +6,7 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Real bank statements — never commit real financial data
+real-bank-data/
+*relay*.csv

@@ -17,7 +17,9 @@ export type BookkeepingField =
   | 'amount'
   | 'debit'
   | 'credit'
+  | 'type'
   | 'notes'
+  | 'needs_mapping'
   | 'ignore';
 
 export interface ParsedCSV {
@@ -56,6 +58,12 @@ export const FIELD_META: Record<
     required: false,
     group: 'split',
   },
+  type: {
+    label: 'Type (Debit/Credit indicator)',
+    description: 'Per-row label (e.g. "Debit"/"Credit") that decides Income vs Expense; pairs with a single Amount column',
+    required: false,
+    group: 'split',
+  },
   vendor: {
     label: 'Vendor / Payee',
     description: 'Who you paid or received from',
@@ -80,6 +88,12 @@ export const FIELD_META: Record<
     required: false,
     group: 'optional',
   },
+  needs_mapping: {
+    label: 'Needs Mapping',
+    description: "We couldn't confidently match this column — please choose a field",
+    required: false,
+    group: 'other',
+  },
   ignore: {
     label: 'Ignore this column',
     description: 'Skip — will not be imported',
@@ -102,7 +116,7 @@ const HINTS: Record<BookkeepingField, string[]> = {
   ],
   category: [
     'category', 'cat', 'categories', 'category name', 'expense category',
-    'income category', 'classification', 'account',
+    'income category', 'classification',
   ],
   description: [
     'description', 'memo', 'narrative', 'details', 'transaction description',
@@ -116,17 +130,22 @@ const HINTS: Record<BookkeepingField, string[]> = {
   debit: [
     'debit', 'withdrawal', 'debit amount', 'withdrawals', 'dr',
     'charges', 'payment', 'debit amt', 'money out', 'paid out',
-    'debit (php)', 'debit (usd)',
+    'debit (php)', 'debit (usd)', 'expense', 'expenses',
   ],
   credit: [
     'credit', 'deposit', 'credit amount', 'deposits', 'cr',
     'received', 'credit amt', 'money in', 'paid in',
-    'credit (php)', 'credit (usd)',
+    'credit (php)', 'credit (usd)', 'income', 'payment received',
+  ],
+  type: [
+    'type', 'transaction type', 'trans type', 'dr/cr', 'debit/credit',
+    'debit or credit', 'entry type',
   ],
   notes: [
     'notes', 'comments', 'comment', 'additional info', 'extra',
     'internal notes', 'annotation',
   ],
+  needs_mapping: [],
   ignore: [],
 };
 
@@ -138,10 +157,25 @@ function normalize(s: string): string {
 
 function scoreMatch(header: string, hints: string[]): number {
   const h = normalize(header);
+  const words = h.split(/\s+/);
+
   for (let i = 0; i < hints.length; i++) {
-    if (h === hints[i]) return 100 - i;          // exact match → highest score
-    if (h.includes(hints[i])) return 70 - i;     // header contains hint
-    if (hints[i].includes(h)) return 55 - i;     // hint contains header
+    const hint = normalize(hints[i]);
+
+    // 1. Exact match gets highest score
+    if (h === hint) return 1000 - i;
+
+    // 2. Short abbreviations (<= 3 chars like 'cr', 'dr', 'amt') MUST match a whole word
+    if (hint.length <= 3) {
+      if (words.includes(hint)) return 850 - i;
+      continue; // Skip substring search for short abbreviations
+    }
+
+    // 3. Multi-word phrase contained in header (e.g. "transaction date" in "bank transaction date")
+    if (hint.includes(' ') && h.includes(hint)) return 800 - i;
+
+    // 4. Single-word hint is an exact word in the header (e.g. "amount" in "total amount")
+    if (!hint.includes(' ') && words.includes(hint)) return 750 - i;
   }
   return 0;
 }
@@ -150,44 +184,53 @@ function scoreMatch(header: string, hints: string[]): number {
 
 /**
  * Given a list of CSV column headers, returns a best-guess mapping
- * of each header → BookkeepingField.
- *
- * Priority order ensures that split Debit/Credit columns are preferred
- * over a single Amount column when both are present.
+ * of each header → BookkeepingField using global optimal scoring.
  */
 export function autoDetectMappings(headers: string[]): Record<string, BookkeepingField> {
   const mapping: Record<string, BookkeepingField> = {};
-  const usedHeaders = new Set<string>();
-
-  // Detection priority: date → debit → credit → amount → vendor → category → description → notes
-  const DETECTION_ORDER: BookkeepingField[] = [
-    'date', 'debit', 'credit', 'amount', 'vendor', 'category', 'description', 'notes',
+  const ALL_FIELDS: BookkeepingField[] = [
+    'date', 'debit', 'credit', 'amount', 'type', 'vendor', 'category', 'description', 'notes',
   ];
 
-  for (const field of DETECTION_ORDER) {
-    const hints = HINTS[field];
-    let bestScore = 0;
-    let bestHeader = '';
+  // Calculate all (header, field, score) tuples
+  interface Candidate {
+    header: string;
+    field: BookkeepingField;
+    score: number;
+  }
 
-    for (const header of headers) {
-      if (usedHeaders.has(header)) continue;
-      const score = scoreMatch(header, hints);
-      if (score > bestScore) {
-        bestScore = score;
-        bestHeader = header;
+  const candidates: Candidate[] = [];
+
+  for (const header of headers) {
+    for (const field of ALL_FIELDS) {
+      const score = scoreMatch(header, HINTS[field]);
+      if (score > 0) {
+        candidates.push({ header, field, score });
       }
-    }
-
-    if (bestScore > 0 && bestHeader) {
-      mapping[bestHeader] = field;
-      usedHeaders.add(bestHeader);
     }
   }
 
-  // Unmapped columns → ignore
+  // Sort candidates by score descending
+  candidates.sort((a, b) => b.score - a.score);
+
+  const usedHeaders = new Set<string>();
+  const usedFields = new Set<BookkeepingField>();
+
+  for (const { header, field, score } of candidates) {
+    if (usedHeaders.has(header) || usedFields.has(field)) continue;
+
+    // If score is high enough (confident), map it
+    if (score >= 700) {
+      mapping[header] = field;
+      usedHeaders.add(header);
+      usedFields.add(field);
+    }
+  }
+
+  // Unmapped columns → flagged as "Needs Mapping" rather than silently ignored
   for (const header of headers) {
     if (!(header in mapping)) {
-      mapping[header] = 'ignore';
+      mapping[header] = 'needs_mapping';
     }
   }
 
@@ -226,8 +269,19 @@ export function validateMapping(mapping: Record<string, BookkeepingField>): Mapp
     warnings.push('"Credit" mapped but not "Debit" — expense rows will be skipped.');
   }
 
+  if (values.includes('type') && !hasAmount) {
+    warnings.push('"Type" (Debit/Credit indicator) is mapped but no "Amount" column is mapped — it will be ignored.');
+  }
+
   if (!values.includes('vendor') && !values.includes('description')) {
     warnings.push('No Vendor or Description mapped — transactions will have minimal detail.');
+  }
+
+  const needsMappingCount = values.filter((v) => v === 'needs_mapping').length;
+  if (needsMappingCount > 0) {
+    warnings.push(
+      `${needsMappingCount} column${needsMappingCount > 1 ? 's' : ''} could not be confidently auto-detected — please map or ignore ${needsMappingCount > 1 ? 'them' : 'it'} manually.`
+    );
   }
 
   return { isValid: errors.length === 0, errors, warnings };
