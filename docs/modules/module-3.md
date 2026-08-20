@@ -199,7 +199,7 @@ Date, Tax Year, Transaction Type, Amount, Currency, Vendor, Client, Description,
 
 # **15. CSV Rules**
 
-One transaction per row. Preserve original amounts/dates. NEVER mix Personal transactions. NEVER convert USD/PHP. 
+One transaction per row. Preserve original amounts/dates. NEVER mix Personal transactions. The export NEVER converts currency at export time — it writes the stored `amount`/`currency` as-is. (A Business expense paid in pesos was already converted to USD when it was recorded, at that date's rate; the export simply uses that stored USD figure and never recalculates it.)
 
 ---
 

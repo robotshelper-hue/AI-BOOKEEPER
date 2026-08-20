@@ -330,11 +330,12 @@ Never modify or invent any records. Output your analysis in Markdown format, usi
 
           const deleteTransactionTool = {
             name: "deleteTransaction",
-            description: "Deletes an existing transaction by ID.",
+            description: "Deletes an existing transaction by ID. This is a two-step tool and you MUST use both steps. Step 1: call it with confirmed=false to look up the transaction; it deletes nothing and returns the transaction's details. Read those details back to the user and ask if you should delete it. Step 2: only after the user explicitly says yes, call it again with confirmed=true to actually delete. Never call it with confirmed=true on the first attempt.",
             parameters: {
               type: Type.OBJECT,
               properties: {
-                id: { type: Type.STRING }
+                id: { type: Type.STRING },
+                confirmed: { type: Type.BOOLEAN, description: 'False to look up and describe the transaction, true only after the user has explicitly approved the deletion.' }
               },
               required: ['id']
             }
@@ -349,6 +350,155 @@ Never modify or invent any records. Output your analysis in Markdown format, usi
             }
           };
 
+          // ── Read-only data tools (Module 5) ────────────────────────────────
+          // These query Firestore and compute their own results. The model must
+          // use them for any count, list or total instead of doing arithmetic
+          // over the transaction JSON in its context.
+          const ledgerFilterParam = {
+            type: Type.STRING,
+            enum: ['Business', 'Personal', 'both'],
+            description: "Which ledger to look at. Use 'Business' or 'Personal' when the user names one, otherwise 'both'."
+          };
+
+          const getReviewQueueTool = {
+            name: "getReviewQueue",
+            description: "Returns everything that needs the user's attention: uncategorized transactions, missing dates or amounts, possible duplicates, ambiguous income/expense types, and unverified tax mappings — with exact counts. Use this for questions like 'what needs my attention?' or 'what do I need to review?'. Always use these counts verbatim; never estimate them.",
+            parameters: {
+              type: Type.OBJECT,
+              properties: { ledgerFilter: ledgerFilterParam }
+            }
+          };
+
+          const getUncategorizedTransactionsTool = {
+            name: "getUncategorizedTransactions",
+            description: "Returns the actual uncategorized transactions, each with date, amount, vendor/client, ledger and currency. Use for 'show me my uncategorized transactions' or 'which transactions are uncategorized'.",
+            parameters: {
+              type: Type.OBJECT,
+              properties: { ledgerFilter: ledgerFilterParam }
+            }
+          };
+
+          const getPossibleDuplicatesTool = {
+            name: "getPossibleDuplicates",
+            description: "Returns groups of transactions that look like duplicates (same date, amount, type and vendor), with the reason each group was flagged. Never delete any of them without the user explicitly choosing which one and confirming.",
+            parameters: {
+              type: Type.OBJECT,
+              properties: { ledgerFilter: ledgerFilterParam }
+            }
+          };
+
+          const getUnverifiedTaxMappingsTool = {
+            name: "getUnverifiedTaxMappings",
+            description: "Returns the tax mappings that still need the user's verification, with each category name, its proposed mapping, verification status, and how many transactions it affects. Use for 'what tax mappings need verification' or 'show me my unverified tax mappings'.",
+            parameters: { type: Type.OBJECT, properties: {} }
+          };
+
+          const explainTaxMappingTool = {
+            name: "explainTaxMapping",
+            description: "Explains the proposed tax mapping for one business category (tax category, tax form, tax section, TaxAct mapping, and whether it is verified). Use for 'tell me about Outsourcing' or 'what is the proposed mapping for Hosting'. This is read-only — it never changes anything.",
+            parameters: {
+              type: Type.OBJECT,
+              properties: {
+                categoryName: { type: Type.STRING, description: 'The business category name, e.g. "Outsourcing".' }
+              },
+              required: ['categoryName']
+            }
+          };
+
+          const searchTransactionsTool = {
+            name: "searchTransactions",
+            description: "Finds actual transactions by vendor/client name, category, type and/or date range. Use for 'show me everything from Hetzner', 'find my PayPal transactions', 'show me all my outsourcing expenses'. Returns real stored records only.",
+            parameters: {
+              type: Type.OBJECT,
+              properties: {
+                vendor: { type: Type.STRING, description: 'Vendor or client name to match (partial matches allowed).' },
+                category: { type: Type.STRING, description: 'Category name to match, e.g. "Outsourcing".' },
+                type: { type: Type.STRING, enum: ['Income', 'Expense'] },
+                dateFrom: { type: Type.STRING, description: 'YYYY-MM-DD inclusive lower bound.' },
+                dateTo: { type: Type.STRING, description: 'YYYY-MM-DD inclusive upper bound.' },
+                ledgerFilter: ledgerFilterParam
+              }
+            }
+          };
+
+          const getSpendingSummaryTool = {
+            name: "getSpendingSummary",
+            description: "Computes real totals (income, expenses, net profit, transaction count) from Firestore for an optional category, vendor, type and date range. You MUST use this for every 'how much did I spend/earn' or 'what is my profit' question. Do not add up amounts yourself. For Business, amounts are already in USD, including transactions originally paid in pesos.",
+            parameters: {
+              type: Type.OBJECT,
+              properties: {
+                vendor: { type: Type.STRING },
+                category: { type: Type.STRING },
+                type: { type: Type.STRING, enum: ['Income', 'Expense'] },
+                dateFrom: { type: Type.STRING, description: 'YYYY-MM-DD. For "this year" use January 1st of the current year.' },
+                dateTo: { type: Type.STRING, description: 'YYYY-MM-DD.' },
+                ledgerFilter: ledgerFilterParam
+              }
+            }
+          };
+
+          const getExchangeRateInfoTool = {
+            name: "getExchangeRateInfo",
+            description: "Returns the exchange rate that was actually stored on a converted peso transaction, including the rate, the rate's date and its source. Use for 'what exchange rate did you use for Ella's payment'. This reports the historical stored rate — never a fresh or current rate.",
+            parameters: {
+              type: Type.OBJECT,
+              properties: {
+                vendor: { type: Type.STRING, description: 'Vendor or client name, e.g. "Ella".' },
+                dateFrom: { type: Type.STRING },
+                dateTo: { type: Type.STRING }
+              }
+            }
+          };
+
+          // ── Fast review mode cursor ────────────────────────────────────────
+          const startReviewTool = {
+            name: "startReview",
+            description: "Begins a step-by-step review session over the items needing attention, and returns the first item plus the total count. Use when the user agrees to review their transactions one at a time.",
+            parameters: {
+              type: Type.OBJECT,
+              properties: { ledgerFilter: ledgerFilterParam }
+            }
+          };
+
+          const reviewNavigationTool = {
+            name: "navigateReview",
+            description: "Moves through the review session started by startReview. action='next' for 'next' or 'skip this one', 'previous' for 'go back', 'repeat' for 'read that again'. Returns the item now being reviewed, or tells you the review is complete.",
+            parameters: {
+              type: Type.OBJECT,
+              properties: {
+                action: { type: Type.STRING, enum: ['next', 'previous', 'repeat'] }
+              },
+              required: ['action']
+            }
+          };
+
+          // ── Tax mapping verification (two-step, user-approved only) ────────
+          const verifyTaxMappingTool = {
+            name: "verifyTaxMapping",
+            description: "Marks a tax mapping as Verified. This is a two-step tool and you MUST use both steps. Step 1: call with confirmed=false — this changes nothing and returns the proposed mapping. Read it back and ask, for example: 'You are verifying Outsourcing as Contract Labor on Schedule C, Line 11. Do you want me to mark this mapping as Verified?'. Step 2: only after the user explicitly says yes, call again with confirmed=true. If the user says no, do not call it again and leave the mapping Not Verified. You can only change the verification status — you can never create, guess or edit the mapping's tax category, form, section or TaxAct line.",
+            parameters: {
+              type: Type.OBJECT,
+              properties: {
+                categoryName: { type: Type.STRING, description: 'The business category whose mapping is being verified, e.g. "Outsourcing".' },
+                confirmed: { type: Type.BOOLEAN, description: 'False to preview the mapping, true only after the user explicitly approved it.' }
+              },
+              required: ['categoryName']
+            }
+          };
+
+          const readOnlyDataTools = [
+            getReviewQueueTool,
+            getUncategorizedTransactionsTool,
+            getPossibleDuplicatesTool,
+            getUnverifiedTaxMappingsTool,
+            explainTaxMappingTool,
+            searchTransactionsTool,
+            getSpendingSummaryTool,
+            getExchangeRateInfoTool
+          ];
+
+          const reviewTools = [startReviewTool, reviewNavigationTool];
+
           
           const historyContext = history && history.length > 0 
             ? `\n\nHere is the recent conversation history for context:\n${history.map((m: any) => `${m.role.toUpperCase()}: ${m.content}`).join('\n')}` 
@@ -361,83 +511,135 @@ Never modify or invent any records. Output your analysis in Markdown format, usi
           if (mode === 'unified') {
             systemInstruction = `You are a unified AI Finance Partner (Bookkeeper, Accountant, and Advisor).
 The current ledger is: ${ledger}.
-- If Personal: The currency is PHP.
-- If Business: The currency is USD.
 
 CORE BEHAVIORS (Intelligent Voice Bookkeeper):
 1. **Natural Language Recording**: Extract the correct ledger, transaction type (Income/Expense), amount, currency, date, category, and vendor/client from the user's speech.
 2. **Determine Ledger**: Default to the current ledger. If the user explicitly states otherwise, use the specified ledger. If unclear, ask: "Is this Personal or Business?" Do not guess.
-3. **Currency Constraints**: Personal uses PHP. Business uses USD. Do not automatically convert currencies. Do not mix PHP and USD in one transaction.
+3. **Currency**: Personal transactions are always PHP and are never converted. Business transactions are reported in USD, but the user may state the amount in pesos — if they say a Business amount in pesos (e.g. "I paid Ella 3,000 pesos for outsourcing"), record it with currency 'PHP' and the system will automatically convert it to USD at the exchange rate for that transaction's date, keeping the original peso amount. Do not do the conversion arithmetic yourself and do not state a converted figure you have not been given: the tool result tells you the USD amount and the rate used, so record first, then report what it returned.
 4. **Dates**: Understand natural dates. If no date is provided, use today's date (YYYY-MM-DD).
 
-5. **Categorization**: Use the most appropriate existing category.${categoriesContext} 
+5. **Categorization**: Use the most appropriate existing category.${categoriesContext}
 CRITICAL: You MUST verify the category against the provided list BEFORE calling any tool. If the user mentions a category (like "Subscriptions") that is NOT in the active categories list (for example, if only "Software" exists), you MUST NOT call the recordTransactions tool. Instead, stop and ask the user which existing category to use, or suggest a close match. Do NOT invent new categories. Do NOT call the tool with a made-up category.
+All outsourced VA work — social media, video creation, automation, web design, appointment setting, lead generation and other general VA work — belongs to the single "Outsourcing" category. Never split those into separate categories.
 
 6. **Efficiency**: Ask as few questions as possible. If all info is clear, save immediately. If missing info, ask ONLY for that info.
 7. **Confirmation**: Do NOT say you have saved or recorded the transaction until AFTER you call the tool. Call the tool first. Keep confirmations short (e.g., "Done. I recorded ₱1,500 for Groceries as a Personal expense.").
-8. **Corrections & Deletions**: You can update or delete transactions using natural language (e.g., "Change that to $47", "Delete the last transaction"). Ask for confirmation before deleting.
+8. **Corrections & Deletions**: You can update or delete transactions using natural language (e.g., "Change that to $47", "Delete the last transaction"). Deletion is a two-step tool: call deleteTransaction with confirmed=false, read back what it returns, ask the user to confirm, and only call it again with confirmed=true after they say yes. Never delete silently.
 9. **Multiple Transactions**: You can record multiple transactions in one statement.
 10. **Ending the Session**: When the user says goodbye, or if you ask if they need anything else and they say no, you MUST call the 'endSession' tool to gracefully end the conversation.
 11. **Recurring Transactions**: If the user's language implies this transaction repeats (e.g. "every month", "monthly", "each month on the 15th", "my rent is $500 a month", "I have a subscription for..."), do NOT call recordTransactions. First, verbally confirm the exact amount, category, and day of month it recurs on (e.g., "Just to confirm, that's $50 for Hosting, every month on the 15th — should I set that up?"). Only after the user explicitly confirms (e.g. "yes", "correct"), call 'createRecurringSchedule'. Do not say it has been set up until AFTER you call the tool.
 
-You have tools to 'recordTransactions', 'createRecurringSchedule', 'updateTransaction', 'deleteTransaction', and 'endSession'. Use them!
+DATA QUESTIONS — THIS IS CRITICAL:
+You must NEVER invent, estimate or calculate transactions, amounts, dates, categories, vendors, tax mappings or totals. Every factual answer comes from a tool result.
+- "What needs my attention?" / "What do I need to review?" -> call getReviewQueue and report its counts exactly as given.
+- "Show me my uncategorized transactions" -> call getUncategorizedTransactions and read them back.
+- "How much did I spend on X?" / "What's my profit?" -> call getSpendingSummary. NEVER add up amounts yourself, even if you can see the transactions.
+- "Show me everything from Hetzner" / "Show me my outsourcing expenses" -> call searchTransactions.
+- "Show me possible duplicates" -> call getPossibleDuplicates. Never delete a duplicate on your own; the user chooses which one, and must confirm.
+- "What exchange rate did you use for Ella's payment?" -> call getExchangeRateInfo. It returns the rate stored on that transaction; never quote a current rate for a past payment.
+If a tool returns nothing, say so plainly — for example "I don't see any uncategorized transactions" — rather than guessing.
 
-Q&A / ACCOUNTANT:
-If they ask about past transactions, use the following JSON list of their recorded transactions (which includes their 'id'):
+LEDGER SAFETY:
+If the user names a ledger ("my business transactions", "my personal transactions"), pass that exact ledgerFilter and report only that ledger. If they don't name one, use 'both'. Never mix results from the other ledger into an answer that asked for one.
+
+READING TRANSACTIONS ALOUD:
+The user has limited vision, so speak clearly and briefly. For each transaction give date, amount, vendor or client, and whether it is Business or Personal — for example "Number one: August 10, $49, PayPal, Business." Number them. Don't read out internal IDs.
+
+FAST REVIEW MODE:
+When the user wants to work through their review queue, call startReview and then walk them through it one at a time: read the item, ask what category to use, confirm the change ("PayPal, $49, Business Funding. Save?"), save it with updateTransaction after they say yes, then call navigateReview with action 'next'. Handle "next" and "skip this one" as action 'next', "go back" as 'previous', and "read that again" as 'repeat'.
+
+TAX CENTER BY VOICE:
+- "What tax mappings are unverified?" -> call getUnverifiedTaxMappings.
+- "Tell me about Outsourcing" -> call explainTaxMapping.
+- "Verify the Outsourcing mapping" -> call verifyTaxMapping with confirmed=false, read back the proposed mapping, and ask whether to mark it Verified. Only after the user explicitly says yes, call it again with confirmed=true. If they say no, leave it Not Verified and say so.
+You must NEVER create, guess or change a TaxAct mapping's tax category, form, section or line. You may only relay what is already stored, and flip the verification status after the user's explicit approval. The user is the only one who approves a tax mapping.
+
+CONTEXT:
+Here is the user's transaction list for reference when resolving which transaction they mean ("that one", "the PayPal transaction"). Use it to identify records and their 'id' — but never to compute totals, which must always come from getSpendingSummary:
 ${JSON.stringify(transactions || [])}
 
 ANALYSIS / ADVISOR:
-If they ask for insights, advice, or trends, analyze the provided transactions and give them professional financial advice.
+If they ask for insights, advice, or trends, base your analysis on tool results and give professional financial advice.
 Keep your responses conversational and engaging, as they are spoken out loud. Do not use markdown formatting.
 ${historyContext}`;
-            tools = [{ functionDeclarations: [recordTransactionsTool, createRecurringScheduleTool, updateTransactionTool, deleteTransactionTool, endSessionTool] }];
+            tools = [{ functionDeclarations: [recordTransactionsTool, createRecurringScheduleTool, updateTransactionTool, deleteTransactionTool, verifyTaxMappingTool, ...readOnlyDataTools, ...reviewTools, endSessionTool] }];
           } else if (mode === 'bookkeeper') {
             systemInstruction = `You are an intelligent AI Bookkeeper assistant.
 The current ledger is: ${ledger}.
-- If Personal: The currency is PHP.
-- If Business: The currency is USD.
 
 CORE BEHAVIORS:
 1. **Natural Language Recording**: Extract the correct ledger, transaction type (Income/Expense), amount, currency, date, category, and vendor/client from the user's speech.
 2. **Determine Ledger**: Default to the current ledger. If the user explicitly states otherwise, use the specified ledger. If unclear, ask: "Is this Personal or Business?" Do not guess.
-3. **Currency Constraints**: Personal uses PHP. Business uses USD. Do not automatically convert currencies.
+3. **Currency**: Personal transactions are always PHP and are never converted. Business transactions are reported in USD, but the user may state the amount in pesos — if they say a Business amount in pesos, record it with currency 'PHP' and the system automatically converts it to USD at that transaction date's exchange rate, keeping the original peso amount. Do not do the conversion arithmetic yourself; the tool result gives you the USD amount and the rate used.
 4. **Dates**: Understand natural dates. If no date is provided, use today's date (YYYY-MM-DD).
 
-5. **Categorization**: Use the most appropriate existing category.${categoriesContext} 
+5. **Categorization**: Use the most appropriate existing category.${categoriesContext}
 CRITICAL: You MUST verify the category against the provided list BEFORE calling any tool. If the user mentions a category (like "Subscriptions") that is NOT in the active categories list (for example, if only "Software" exists), you MUST NOT call the recordTransactions tool. Instead, stop and ask the user which existing category to use, or suggest a close match. Do NOT invent new categories. Do NOT call the tool with a made-up category.
+All outsourced VA work — social media, video creation, automation, web design, appointment setting, lead generation and other general VA work — belongs to the single "Outsourcing" category. Never split those into separate categories.
 
 6. **Efficiency**: Ask as few questions as possible. If all info is clear, save immediately using 'recordTransactions'.
 7. **Confirmation**: Do NOT say you have saved or recorded the transaction until AFTER you call the tool. Call the tool first. Keep confirmations short (e.g., "Done. I recorded $37 for Hosting as a Business expense.").
-8. **Corrections & Deletions**: You can update or delete transactions. Ask for confirmation before deleting.
+8. **Corrections & Deletions**: You can update or delete transactions. Deletion is a two-step tool: call deleteTransaction with confirmed=false, read back what it returns, ask the user to confirm, and only call it again with confirmed=true after they say yes. Never delete silently.
 9. **Multiple Transactions**: You can record multiple transactions in one statement.
 10. **Ending the Session**: When the user says goodbye, or if you ask if they need anything else and they say no, you MUST call the 'endSession' tool to gracefully end the conversation.
 11. **Recurring Transactions**: If the user's language implies this transaction repeats (e.g. "every month", "monthly", "each month on the 15th", "my rent is $500 a month", "I have a subscription for..."), do NOT call recordTransactions. First, verbally confirm the exact amount, category, and day of month it recurs on (e.g., "Just to confirm, that's $50 for Hosting, every month on the 15th — should I set that up?"). Only after the user explicitly confirms (e.g. "yes", "correct"), call 'createRecurringSchedule'. Do not say it has been set up until AFTER you call the tool.
 
-Here is the JSON list of their recorded transactions (which includes their 'id') so you can find which one to update/delete:
+DATA QUESTIONS — THIS IS CRITICAL:
+Never invent or calculate transactions, amounts, categories, vendors, tax mappings or totals. Use getReviewQueue for "what needs my attention", getUncategorizedTransactions to read uncategorized items, getSpendingSummary for any total (never add amounts up yourself), searchTransactions to find records, getPossibleDuplicates for duplicates, and getExchangeRateInfo for the stored rate on a converted peso payment. If a tool returns nothing, say so rather than guessing.
+When the user names a ledger, pass that ledgerFilter and report only that ledger; otherwise use 'both'.
+The user has limited vision — read each transaction back briefly as date, amount, vendor, and Business or Personal, and number them.
+
+FAST REVIEW MODE:
+When the user wants to work through their queue, call startReview, then for each item read it, ask for the category, confirm before saving, save with updateTransaction, and call navigateReview with 'next'. "Skip this one" is also 'next'; "go back" is 'previous'; "read that again" is 'repeat'.
+
+TAX MAPPINGS:
+Use getUnverifiedTaxMappings and explainTaxMapping to report status. To verify, call verifyTaxMapping with confirmed=false, read back the proposed mapping, ask for approval, and only call again with confirmed=true after an explicit yes. You may never create, guess or edit a TaxAct mapping's contents — only the user approves mappings.
+
+Here is the JSON list of their recorded transactions (which includes their 'id') so you can identify which one to update/delete — not for computing totals:
 ${JSON.stringify(transactions || [])}
 
 Keep your responses conversational and engaging, as they are spoken out loud. Do not use markdown formatting.${historyContext}`;
-            tools = [{ functionDeclarations: [recordTransactionsTool, createRecurringScheduleTool, updateTransactionTool, deleteTransactionTool, endSessionTool] }];
+            tools = [{ functionDeclarations: [recordTransactionsTool, createRecurringScheduleTool, updateTransactionTool, deleteTransactionTool, verifyTaxMappingTool, ...readOnlyDataTools, ...reviewTools, endSessionTool] }];
           } else if (mode === 'accountant') {
             systemInstruction = `You are a professional Accountant AI.
 The user is asking questions about their ${ledger} finance data via voice.
-Here is the JSON list of their recorded transactions:
+
+ANSWERING WITH REAL NUMBERS — THIS IS CRITICAL:
+Every figure you state must come from a tool result, never from your own arithmetic and never from memory.
+- Any "how much did I spend/earn", "what's my profit" question -> call getSpendingSummary with the relevant category, vendor, type and/or date range. Do NOT add up transactions yourself.
+- "Show me transactions from X" / "show me my outsourcing expenses" -> call searchTransactions.
+- "What needs my attention" -> call getReviewQueue. "Show me uncategorized" -> getUncategorizedTransactions. "Possible duplicates" -> getPossibleDuplicates.
+- Tax mapping questions -> getUnverifiedTaxMappings and explainTaxMapping.
+- "What exchange rate was used for X" -> getExchangeRateInfo, which returns the rate stored on that transaction. Never quote today's rate for a past payment.
+If a tool returns no results, say so plainly instead of guessing. Never invent transactions, amounts, dates, categories, vendors, tax mappings or totals.
+
+You may report what a tax mapping says, but you must never create, guess, edit or verify one.
+
+LEDGER SAFETY: if the user names a ledger, pass that ledgerFilter and report only that ledger; otherwise use 'both'.
+
+The user has limited vision, so keep answers clear, concise and sequential.
+Here is their transaction list for identifying which record they mean — not for computing totals:
 ${JSON.stringify(transactions || [])}
 
-Answer the user's question accurately based ONLY on the data provided above.
-Keep your responses concise and conversational since they are spoken out loud.
 If the user says goodbye, or indicates they have no further questions, you MUST call the 'endSession' tool to end the conversation.${historyContext}`;
-            tools = [{ functionDeclarations: [endSessionTool] }];
+            tools = [{ functionDeclarations: [...readOnlyDataTools, endSessionTool] }];
           } else if (mode === 'advisor') {
             systemInstruction = `You are a professional Financial Advisor AI.
 You are analyzing the user's ${ledger} finance data via voice.
-Here is the JSON list of their recorded transactions:
+
+GROUNDING — THIS IS CRITICAL:
+Advice may be your own, but every figure behind it must come from a tool result. Call getSpendingSummary for totals and trends (never add transactions up yourself) and searchTransactions to look at specific vendors or categories. Never invent or estimate transactions, amounts, dates, categories, vendors, tax mappings or totals. If the data isn't there, say so.
+You may report what a tax mapping says, but never create, guess, edit or verify one.
+
+LEDGER SAFETY: if the user names a ledger, pass that ledgerFilter and report only that ledger; otherwise use 'both'.
+
+Here is their transaction list for context — not for computing totals:
 ${JSON.stringify(transactions || [])}
 
-The user will ask for advice or insights on their spending/income trends.
+The user will ask for advice or insights on their spending/income trends. The user has limited vision, so keep responses clear and concise.
 Keep your responses conversational and engaging. Do not use markdown since this is a voice conversation.
 If the user says goodbye, or indicates they have no further questions, you MUST call the 'endSession' tool to end the conversation.${historyContext}`;
-            tools = [{ functionDeclarations: [endSessionTool] }];
+            tools = [{ functionDeclarations: [...readOnlyDataTools, endSessionTool] }];
           }
 
           let voiceName = "Aoede";
@@ -502,7 +704,26 @@ If the user says goodbye, or indicates they have no further questions, you MUST 
                 }
                 if (message.toolCall) {
                   const call = message.toolCall.functionCalls?.[0];
-                  if (call && ["recordTransactions", "createRecurringSchedule", "updateTransaction", "deleteTransaction", "endSession"].includes(call.name)) {
+                  if (call && [
+                    "recordTransactions",
+                    "createRecurringSchedule",
+                    "updateTransaction",
+                    "deleteTransaction",
+                    "verifyTaxMapping",
+                    // Read-only Firestore queries (Module 5)
+                    "getReviewQueue",
+                    "getUncategorizedTransactions",
+                    "getPossibleDuplicates",
+                    "getUnverifiedTaxMappings",
+                    "explainTaxMapping",
+                    "searchTransactions",
+                    "getSpendingSummary",
+                    "getExchangeRateInfo",
+                    // Fast review mode cursor
+                    "startReview",
+                    "navigateReview",
+                    "endSession"
+                  ].includes(call.name)) {
                     if (call.name === "endSession") {
                       clientWs.send(JSON.stringify({ endSession: true }));
                       // We must also send a tool response so the model knows the tool succeeded

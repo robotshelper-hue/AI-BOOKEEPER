@@ -4,6 +4,7 @@ import { collection, query, where, getDocs, orderBy, updateDoc, doc } from 'fire
 import { db } from '../lib/firebase';
 import { CategoryDocument, TaxMappingDocument } from '../types';
 import { getTransactionLabel, getTransactionEntity, getTransactionEntityLabel, getTransactionDescriptionCell } from '../lib/transactionDisplay';
+import { taxColumnsFor } from '../lib/taxExport';
 import { AlertCircle, CheckCircle2, Download, Filter, ChevronRight, FileText } from 'lucide-react';
 
 export default function TaxCenter() {
@@ -148,8 +149,7 @@ export default function TaxCenter() {
     const rows = txsToExport.map(tx => {
       const txYear = tx.date ? tx.date.substring(0, 4) : new Date(tx.timestamp).getFullYear().toString();
       const mapping = mappings[tx.category] || mappings[tx.categoryId] || {} as Partial<TaxMappingDocument>;
-      const isVerified = mapping.status === 'Verified';
-      
+
       const baseCols = [
         tx.date || new Date(tx.timestamp).toISOString().split('T')[0],
         txYear,
@@ -161,12 +161,10 @@ export default function TaxCenter() {
         `"${tx.category || ''}"`
       ];
 
-      const taxCols = exportFormat === 'no_tax' ? [] : [
-        `"${isVerified ? (mapping.taxCategory || '') : ''}"`,
-        `"${isVerified ? (mapping.taxForm || '') : ''}"`,
-        `"${isVerified ? (mapping.taxSection || '') : ''}"`,
-        `"${isVerified ? (mapping.taxActMapping || '') : ''}"`
-      ];
+      // Blank unless the user has verified the mapping — see lib/taxExport.
+      const taxCols = exportFormat === 'no_tax'
+        ? []
+        : taxColumnsFor(mapping).map(v => `"${v.replace(/"/g, '""')}"`);
 
       const cols = [...baseCols, ...taxCols, `"${tx.notes || ''}"`];
       return cols.join(',');

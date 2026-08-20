@@ -30,6 +30,7 @@ export const defaultCategories = [
   { name: 'AI Automation', ledger: 'Business', type: 'Income' },
   { name: 'Consulting', ledger: 'Business', type: 'Income' },
   { name: 'Affiliate Income', ledger: 'Business', type: 'Income' },
+  { name: 'Business Funding', ledger: 'Business', type: 'Income' },
   { name: 'Other Business Income', ledger: 'Business', type: 'Income' },
 
   // Business Expenses (USD)
@@ -42,7 +43,9 @@ export const defaultCategories = [
   { name: 'Advertising', ledger: 'Business', type: 'Expense' },
   { name: 'Marketing', ledger: 'Business', type: 'Expense' },
   { name: 'Developers', ledger: 'Business', type: 'Expense' },
-  { name: 'Virtual Assistants', ledger: 'Business', type: 'Expense' },
+  // Single category for all outsourced VA work (social media, video, automation,
+  // web design, appointment setting, lead gen). Deliberately NOT split per service.
+  { name: 'Outsourcing', ledger: 'Business', type: 'Expense' },
   { name: 'Office Supplies', ledger: 'Business', type: 'Expense' },
   { name: 'Computer Equipment', ledger: 'Business', type: 'Expense' },
   { name: 'Internet', ledger: 'Business', type: 'Expense' },

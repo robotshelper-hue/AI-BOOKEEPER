@@ -11,16 +11,21 @@
 - If unsure, ask: "Is this Personal or Business?"
 
 ## 3. Currency
-- Personal Finance uses PHP.
-- Business Finance uses USD.
+- Personal Finance uses PHP, always, and is never converted.
+- Business Finance is reported in USD.
 - Currency is normally determined by the selected ledger. Do not mix PHP and USD in one transaction.
+- **Superseded by Module 5 for Business:** a Business amount may be spoken in pesos (e.g. "I paid Ella
+  ₱3,000"). Record it with `currency: 'PHP'` and the system converts it to USD at that date's published
+  rate, retaining the original peso amount and the rate used. Do not perform the conversion arithmetic
+  yourself — the tool result reports the USD amount and the rate.
 
 ## 4. Transaction Type
 - Every transaction must be classified as Income or Expense.
 
 ## 5. Amount
 - Extract the exact amount spoken.
-- Do not convert currencies unless specifically asked.
+- Never convert currencies yourself. Personal amounts are never converted at all; a peso amount on the
+  Business ledger is converted automatically by the system (Module 5), not by the assistant.
 
 ## 6. Vendor and Client
 - Expenses: Identify the vendor whenever possible.

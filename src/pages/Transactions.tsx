@@ -135,6 +135,18 @@ export default function Transactions() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-medium text-gray-900">
                       {tx.currency === 'PHP' ? '₱' : '$'}{Number(tx.amount || 0).toFixed(2)}
+                      {/* Business amounts paid in pesos keep their original value
+                          and the rate they were booked at, shown here so the
+                          conversion is auditable rather than just stored. */}
+                      {tx.originalCurrency === 'PHP' && tx.originalAmount != null && (
+                        <div
+                          className="text-xs font-normal text-gray-500 mt-0.5"
+                          title={`Rate ${tx.exchangeRate} published for ${tx.exchangeRateDate} — source: ${tx.exchangeRateSource}`}
+                        >
+                          ₱{Number(tx.originalAmount).toFixed(2)} @ {tx.exchangeRate}
+                          {tx.exchangeRateDate ? ` (${tx.exchangeRateDate})` : ''}
+                        </div>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
                       {confirmDeleteId === tx.id ? (

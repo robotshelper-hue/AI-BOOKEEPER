@@ -104,16 +104,19 @@ function CategoryManager({ ledger }: { ledger: string }) {
       
       const allCats = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as CategoryDocument));
       
-      // Deduplicate by name
-      const seenNames = new Set<string>();
+      // Deduplicate by name + type (a name like "Business Funding" can legitimately
+      // exist once as Income and once as Expense — only an exact name+type repeat
+      // is a real duplicate).
+      const seenKeys = new Set<string>();
       const deduplicatedCats: CategoryDocument[] = [];
       const duplicatesToDelete: string[] = [];
 
       for (const cat of allCats) {
-        if (seenNames.has(cat.name)) {
+        const key = `${cat.name.trim().toLowerCase()}::${cat.type}`;
+        if (seenKeys.has(key)) {
           if (cat.id) duplicatesToDelete.push(cat.id);
         } else {
-          seenNames.add(cat.name);
+          seenKeys.add(key);
           deduplicatedCats.push(cat);
         }
       }

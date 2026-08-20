@@ -6,7 +6,21 @@ import { VoiceActivationBanner } from './VoiceActivationBanner';
 import { useLiveBookkeeper } from '../hooks/useLiveBookkeeper';
 import { generateOccurrencesForSchedule } from '../hooks/useRecurringTransactionGenerator';
 import { nextOccurrenceOnOrAfter, todayDateString } from '../lib/recurrence';
-import { RecurringScheduleDocument } from '../types';
+import { RecurringScheduleDocument, TaxMappingDocument } from '../types';
+import { convertPhpToUsd } from '../lib/exchangeRates';
+import { runModule5Migration } from '../lib/module5Migration';
+import {
+  getReviewQueue,
+  getUncategorizedTransactions,
+  getPossibleDuplicates,
+  getUnverifiedTaxMappings,
+  explainTaxMapping,
+  searchTransactions,
+  getSpendingSummary,
+  getExchangeRateInfo,
+  describeForVoice,
+  VoiceTransaction,
+} from '../lib/voiceQueries';
 
 interface UnifiedAgentProps {
   ledger: string;
@@ -28,6 +42,15 @@ export default function UnifiedAgentTab({ ledger, userId }: UnifiedAgentProps) {
   const [transactionsLoaded, setTransactionsLoaded] = useState(false);
 
   const [categories, setCategories] = useState<any[]>([]);
+
+  /**
+   * Fast Review Mode cursor. Kept in a ref rather than Firestore because it is
+   * conversation state, not data: which item we are on only has meaning inside
+   * the current session. Holding it here (instead of asking the model to
+   * remember its position) is what makes "next" / "go back" / "read that again"
+   * deterministic.
+   */
+  const reviewSessionRef = useRef<{ items: VoiceTransaction[]; index: number } | null>(null);
 
   const fetchData = useCallback(async () => {
     const qTx = query(
@@ -90,9 +113,21 @@ export default function UnifiedAgentTab({ ledger, userId }: UnifiedAgentProps) {
     setTransactionsLoaded(true);
   }, [ledger, userId]);
 
+  // Module 5 consolidates "Virtual Assistants" into the single "Outsourcing"
+  // category, adds "Business Funding", and seeds Outsourcing's proposed (Not
+  // Verified) tax mapping. It runs once per user and before the first fetch, so
+  // the assistant is never handed a stale category list.
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    let cancelled = false;
+    async function init() {
+      if (userId) {
+        await runModule5Migration(userId);
+      }
+      if (!cancelled) await fetchData();
+    }
+    init();
+    return () => { cancelled = true; };
+  }, [fetchData, userId]);
 
   const [currentTurnCompleted, setCurrentTurnCompleted] = useState(false);
 
@@ -172,7 +207,7 @@ export default function UnifiedAgentTab({ ledger, userId }: UnifiedAgentProps) {
           tx.ledger = tx.ledger ? tx.ledger.charAt(0).toUpperCase() + tx.ledger.slice(1).toLowerCase() : (ledger === 'personal' ? 'Personal' : 'Business');
           tx.type = tx.type ? tx.type.charAt(0).toUpperCase() + tx.type.slice(1).toLowerCase() : 'Expense';
           tx.currency = tx.currency ? tx.currency.toUpperCase() : (tx.ledger === 'Personal' ? 'PHP' : 'USD');
-          
+
           if (!['Personal', 'Business'].includes(tx.ledger) ||
               !['Income', 'Expense'].includes(tx.type) ||
               isNaN(Number(tx.amount)) ||
@@ -180,7 +215,13 @@ export default function UnifiedAgentTab({ ledger, userId }: UnifiedAgentProps) {
               !tx.category) {
             return { error: `Invalid transaction data provided: ${JSON.stringify(tx)}` };
           }
-          
+
+          // The Personal ledger is PHP-only and is never converted, so a USD
+          // amount there is a mis-parse rather than something to silently store.
+          if (tx.ledger === 'Personal' && tx.currency !== 'PHP') {
+            return { error: `Personal transactions must be in PHP. Ask the user whether this ${tx.currency} amount belongs to the Business ledger instead.` };
+          }
+
           const matchedCategory = categories.find(c => c.name.toLowerCase() === tx.category.toLowerCase());
           if (!matchedCategory) {
             return { error: `Category '${tx.category}' does not exist in your settings. You MUST ask the user which existing category to use instead. Do NOT guess.` };
@@ -190,19 +231,50 @@ export default function UnifiedAgentTab({ ledger, userId }: UnifiedAgentProps) {
 
         let count = 0;
         const newTxIds = [];
+        const conversions: string[] = [];
         for (const tx of args.transactions) {
+          const date = tx.date || new Date().toISOString().split('T')[0];
+
+          // A Business amount entered in pesos is converted to USD at that
+          // date's published rate, keeping the original peso amount and the
+          // rate's provenance. Everything downstream (Tax Center totals, the
+          // Business Tax Preparation CSV) reads `amount`, so it stays USD.
+          let amountFields: Record<string, any> = {
+            amount: Number(tx.amount),
+            currency: tx.currency,
+          };
+
+          if (tx.ledger === 'Business' && tx.currency === 'PHP') {
+            try {
+              const converted = await convertPhpToUsd(Number(tx.amount), date);
+              amountFields = converted;
+              conversions.push(
+                `₱${Number(tx.amount).toFixed(2)} was converted to $${converted.amount.toFixed(2)} ` +
+                `using the rate ${converted.exchangeRate} published for ${converted.exchangeRateDate} ` +
+                `(${converted.exchangeRateSource}).`
+              );
+            } catch (conversionError: any) {
+              // Never guess a rate — stop and let the user decide.
+              return {
+                error:
+                  `Could not convert ₱${Number(tx.amount).toFixed(2)} to USD: ${conversionError.message} ` +
+                  `Nothing was saved. Tell the user the exchange rate could not be retrieved and ask whether ` +
+                  `they want to record the amount directly in USD instead.`
+              };
+            }
+          }
+
           const docRef = await addDoc(collection(db, 'Transactions'), {
             userId,
             ledger: tx.ledger,
             type: tx.type,
-            amount: Number(tx.amount),
-            currency: tx.currency,
+            ...amountFields,
             category: tx.category,
             vendor: tx.vendor || null,
             client: tx.client || null,
             description: tx.description || null,
             notes: tx.notes || null,
-            date: tx.date || new Date().toISOString().split('T')[0],
+            date,
             timestamp: Date.now()
           });
           newTxIds.push(docRef.id);
@@ -211,7 +283,11 @@ export default function UnifiedAgentTab({ ledger, userId }: UnifiedAgentProps) {
         setSuccess(true);
         setTimeout(() => setSuccess(false), 3000);
         fetchData();
-        return { result: "Transactions created successfully", newTransactionIds: newTxIds };
+        return {
+          result: "Transactions created successfully",
+          newTransactionIds: newTxIds,
+          ...(conversions.length > 0 ? { currencyConversions: conversions } : {})
+        };
       } else if (name === 'createRecurringSchedule') {
         // The AI is instructed (server.ts system prompt) to verbally confirm the
         // amount/category/day with the user and get an explicit yes before ever
@@ -277,25 +353,205 @@ export default function UnifiedAgentTab({ ledger, userId }: UnifiedAgentProps) {
           }
           args.updates.category = matchedCategory.name;
         }
-        const { doc, updateDoc } = await import('firebase/firestore');
-
+        const { doc, updateDoc, getDoc, deleteField } = await import('firebase/firestore');
 
         const txRef = doc(db, 'Transactions', args.id);
+
+        // Editing the amount of a previously converted peso transaction would
+        // leave the stored rate describing a figure that no longer exists, so
+        // the conversion provenance is dropped rather than left misleading.
+        if (args.updates.amount != null) {
+          const snap = await getDoc(txRef);
+          if (snap.exists() && snap.data()?.originalCurrency === 'PHP') {
+            args.updates.originalAmount = deleteField();
+            args.updates.originalCurrency = deleteField();
+            args.updates.exchangeRate = deleteField();
+            args.updates.exchangeRateDate = deleteField();
+            args.updates.exchangeRateSource = deleteField();
+          }
+        }
+
         await updateDoc(txRef, args.updates);
         setSuccess(true);
         setTimeout(() => setSuccess(false), 3000);
         fetchData();
         return { result: "Transaction updated successfully" };
       } else if (name === 'deleteTransaction' && args.id) {
-        const { doc, deleteDoc } = await import('firebase/firestore');
+        const { doc, deleteDoc, getDoc } = await import('firebase/firestore');
         const txRef = doc(db, 'Transactions', args.id);
+
+        // Two-step delete: the first call only describes what would be removed.
+        // Nothing is destroyed until the user has heard it back and said yes.
+        if (args.confirmed !== true) {
+          const snap = await getDoc(txRef);
+          if (!snap.exists()) {
+            return { error: "I can't find that transaction. It may already have been deleted." };
+          }
+          const data = snap.data();
+          if (data?.userId !== userId) {
+            return { error: "That transaction does not belong to this account." };
+          }
+          return {
+            pendingConfirmation: true,
+            transaction: describeForVoice({ id: args.id, ...data }),
+            category: data?.category ?? null,
+            instruction:
+              'Nothing has been deleted yet. Read this transaction back to the user and ask whether to delete it. ' +
+              'Only if they explicitly say yes, call deleteTransaction again with the same id and confirmed=true.'
+          };
+        }
+
         await deleteDoc(txRef);
+        // Keep the review cursor honest if the deleted item was in the queue.
+        if (reviewSessionRef.current) {
+          const session = reviewSessionRef.current;
+          const removedAt = session.items.findIndex(i => i.id === args.id);
+          if (removedAt !== -1) {
+            session.items.splice(removedAt, 1);
+            if (session.index > removedAt) session.index--;
+            if (session.index >= session.items.length) session.index = Math.max(0, session.items.length - 1);
+          }
+        }
         setSuccess(true);
         setTimeout(() => setSuccess(false), 3000);
         fetchData();
         return { result: "Transaction deleted successfully" };
+
+      // ── Read-only Firestore queries ─────────────────────────────────────────
+      // Each computes its answer in code. The assistant reports these numbers
+      // verbatim; it never derives its own.
+      } else if (name === 'getReviewQueue') {
+        return await getReviewQueue(userId, args.ledgerFilter);
+      } else if (name === 'getUncategorizedTransactions') {
+        return await getUncategorizedTransactions(userId, args.ledgerFilter);
+      } else if (name === 'getPossibleDuplicates') {
+        return await getPossibleDuplicates(userId, args.ledgerFilter);
+      } else if (name === 'getUnverifiedTaxMappings') {
+        return await getUnverifiedTaxMappings(userId);
+      } else if (name === 'explainTaxMapping') {
+        return await explainTaxMapping(userId, args.categoryName);
+      } else if (name === 'searchTransactions') {
+        return await searchTransactions(userId, args || {});
+      } else if (name === 'getSpendingSummary') {
+        return await getSpendingSummary(userId, args || {});
+      } else if (name === 'getExchangeRateInfo') {
+        return await getExchangeRateInfo(userId, args || {});
+
+      // ── Fast review mode ────────────────────────────────────────────────────
+      } else if (name === 'startReview') {
+        const queue = await getReviewQueue(userId, args.ledgerFilter);
+        if (queue.items.length === 0) {
+          reviewSessionRef.current = null;
+          return { totalItems: 0, summary: queue.summary, done: true };
+        }
+        reviewSessionRef.current = { items: queue.items, index: 0 };
+        const first = queue.items[0];
+        return {
+          totalItems: queue.items.length,
+          position: 1,
+          transactionId: first.id,
+          transaction: first.spoken,
+          category: first.category || null,
+          reviewReasons: first.reviewReasons,
+          summary: `Reviewing ${queue.items.length} item${queue.items.length === 1 ? '' : 's'}. First: ${first.spoken}.`
+        };
+      } else if (name === 'navigateReview') {
+        const session = reviewSessionRef.current;
+        if (!session || session.items.length === 0) {
+          return { error: 'No review session is active. Call startReview first.' };
+        }
+
+        const action = (args.action || 'next').toLowerCase();
+        if (action === 'next') {
+          if (session.index >= session.items.length - 1) {
+            return {
+              done: true,
+              summary: 'That was the last item. The review queue is complete.'
+            };
+          }
+          session.index++;
+        } else if (action === 'previous') {
+          if (session.index === 0) {
+            return { atStart: true, summary: 'That is already the first item.' };
+          }
+          session.index--;
+        } // 'repeat' leaves the index alone
+
+        const item = session.items[session.index];
+        return {
+          position: session.index + 1,
+          totalItems: session.items.length,
+          transactionId: item.id,
+          transaction: item.spoken,
+          category: item.category || null,
+          reviewReasons: item.reviewReasons,
+          summary: `Item ${session.index + 1} of ${session.items.length}: ${item.spoken}.`
+        };
+
+      // ── Tax mapping verification (user-approved, two-step) ──────────────────
+      } else if (name === 'verifyTaxMapping') {
+        const { updateDoc, doc, getDocs, query, where, collection } = await import('firebase/firestore');
+
+        if (!args.categoryName) {
+          return { error: 'Tell me which category mapping you want to verify.' };
+        }
+
+        const snap = await getDocs(
+          query(collection(db, 'taxMappings'), where('userId', '==', userId))
+        );
+        const target = String(args.categoryName).trim().toLowerCase();
+        const found = snap.docs
+          .map(d => ({ id: d.id, ...(d.data() as TaxMappingDocument) }))
+          .find(m => (m.businessCategoryName || '').trim().toLowerCase() === target);
+
+        if (!found) {
+          return { error: `I don't see a tax mapping for "${args.categoryName}".` };
+        }
+        if (found.status === 'Verified') {
+          return { result: `${found.businessCategoryName} is already verified.`, status: 'Verified' };
+        }
+
+        const proposal =
+          `${found.businessCategoryName} as ${found.taxCategory || 'an unspecified tax category'} ` +
+          `on ${found.taxForm || 'an unspecified form'}` +
+          `${found.taxSection ? `, ${found.taxSection}` : ''}` +
+          `${found.taxActMapping ? `, ${found.taxActMapping}` : ''}`;
+
+        // Step 1: describe only. Nothing is written.
+        if (args.confirmed !== true) {
+          if (!found.taxCategory && !found.taxForm && !found.taxActMapping) {
+            return {
+              error:
+                `${found.businessCategoryName} has no proposed mapping yet, so there is nothing to verify. ` +
+                `The user needs to fill it in on the Tax Mapping screen first. Do not suggest values yourself.`
+            };
+          }
+          return {
+            pendingConfirmation: true,
+            proposal,
+            status: found.status,
+            instruction:
+              `Nothing has been changed. Say: "You are verifying ${proposal}. Do you want me to mark this mapping as Verified?" ` +
+              `Only if the user explicitly says yes, call verifyTaxMapping again with confirmed=true. If they say no, leave it Not Verified.`
+          };
+        }
+
+        // Step 2: flip the status only. The mapping's tax content is never
+        // written here, so the assistant cannot alter what is being verified.
+        await updateDoc(doc(db, 'taxMappings', found.id!), {
+          status: 'Verified',
+          lastUpdated: Date.now(),
+          updatedBy: userId,
+        });
+        setSuccess(true);
+        setTimeout(() => setSuccess(false), 3000);
+        return {
+          result: `${found.businessCategoryName} is now verified.`,
+          status: 'Verified',
+          verifiedMapping: proposal
+        };
       }
-      
+
       return { error: "Unknown tool call or invalid arguments" };
     } catch (error: any) {
       console.error('Error handling tool call: ', error);

@@ -40,6 +40,20 @@ export interface TransactionDocument {
   date: string; // 'YYYY-MM-DD'
   timestamp: number;
   sourceRecurringScheduleId?: string | null;
+
+  // ── Foreign-currency provenance (Module 5) ─────────────────────────────────
+  // Only populated when the user entered a Business transaction in PHP and it
+  // was auto-converted to USD. `amount`/`currency` remain the canonical
+  // ledger-native values (USD for Business) that every total, report and CSV
+  // export already reads, so nothing downstream needs to know about these.
+  // They exist so the original payment is never lost and so a historical
+  // transaction always reports the rate it was actually booked at — never
+  // today's rate. Absent on transactions that needed no conversion.
+  originalAmount?: number;
+  originalCurrency?: 'PHP' | 'USD';
+  exchangeRate?: number;          // multiply originalAmount by this to get `amount`
+  exchangeRateDate?: string;      // 'YYYY-MM-DD' the rate was published for
+  exchangeRateSource?: string;    // e.g. 'frankfurter.app (ECB reference rate)'
 }
 
 export interface RecurringScheduleDocument {

@@ -87,6 +87,29 @@ export default function TaxMappingManager() {
     fetchMappings();
   }, [currentUser]);
 
+  /**
+   * Marking a mapping Verified is what releases its tax fields into the tax
+   * export, so it gets an explicit confirmation showing exactly what is being
+   * approved. Every other status change saves immediately, as before.
+   */
+  const handleStatusChange = (mapping: TaxMappingDocument, nextStatus: TaxMappingDocument['status']) => {
+    if (nextStatus === 'Verified' && mapping.status !== 'Verified') {
+      const proposal =
+        `${mapping.businessCategoryName} as ${mapping.taxCategory || 'an unspecified tax category'} ` +
+        `on ${mapping.taxForm || 'an unspecified form'}` +
+        `${mapping.taxSection ? `, ${mapping.taxSection}` : ''}` +
+        `${mapping.taxActMapping ? `, ${mapping.taxActMapping}` : ''}`;
+      if (!window.confirm(
+        `You are verifying ${proposal}.\n\n` +
+        `Once verified, these tax fields will be included in your Business Tax Preparation CSV.\n\n` +
+        `Mark this mapping as Verified?`
+      )) {
+        return;
+      }
+    }
+    handleUpdate(mapping, { status: nextStatus });
+  };
+
   const handleUpdate = async (mapping: TaxMappingDocument, updates: Partial<TaxMappingDocument>) => {
     if (!currentUser) return;
     setSaving(mapping.businessCategoryId);
@@ -188,7 +211,7 @@ export default function TaxMappingManager() {
                   <div className="flex items-center justify-center gap-2">
                     <select
                       value={mapping.status}
-                      onChange={(e) => handleUpdate(mapping, { status: e.target.value as any })}
+                      onChange={(e) => handleStatusChange(mapping, e.target.value as TaxMappingDocument['status'])}
                       className={`text-xs rounded-full border px-2 py-1 focus:ring-1 focus:ring-indigo-500 cursor-pointer ${
                         mapping.status === 'Verified' ? 'bg-green-50 border-green-200 text-green-700' :
                         mapping.status === 'Needs Review' ? 'bg-yellow-50 border-yellow-200 text-yellow-700' :
